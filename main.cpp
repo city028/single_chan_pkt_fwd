@@ -30,6 +30,8 @@ using namespace std;
 #include <wiringPi.h>
 #include <wiringPiSPI.h>
 
+#include "lorawan.h"
+
 typedef bool boolean;
 typedef unsigned char byte;
 
@@ -56,11 +58,40 @@ uint32_t cp_up_pkt_fwd;
 
 enum sf_t { SF7=7, SF8, SF9, SF10, SF11, SF12 };
 
+/*
+
+Added by JS
+
+*/
+uint16_t DevNonce = 0; //DevNonce counter starting at 0 whend node is powered up, incremented by every join request
+
+
+//Message Integrity Code
+
+
+
 /*******************************************************************************
- *
- * Configure these values!
- *
- *******************************************************************************/
+*
+* Configure these values!
+*
+* in V1.1 use JOINEUI instead of APPEUI
+*
+*******************************************************************************/
+
+
+// My JOINEUI = APPEUI --> Programme this in TTS when adding a device to an application
+const uint8_t MY_JOINEUI[8] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
+
+
+// My DEVEUI --> Programme this in TTS when adding a device to an application
+const uint8_t MY_DEVEUI[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
+
+// My APPKEY --> The appkey is specified by the end device and is an AES 128 root key e.g.
+// Generated using https://asecuritysite.com/encryption/keygen with a passphrase
+// Need to create an app to ensure the APPKEY's provided to end devices are unique
+const uint8_t MY_APPKEY[16] = { 0xe1, 0x99, 0xd7, 0xf6, 0x47, 0x20, 0x5f, 0x9a, 0x62, 0xf3, 0xd4, 0x9e, 0x45, 0xf4, 0x32, 0x4a };
+
+
 
 // SX1272 - Raspberry connections
 int ssPin = 6;
@@ -71,11 +102,14 @@ int RST   = 0;
 sf_t sf = SF7;
 
 // Set center frequency
-uint32_t  freq = 868100000; // in Mhz! (868.1)
+uint32_t  freq2 = 868100000; // in Mhz! (868.1)
+uint32_t  freq = 433175000; // in Mhz! (433.175)
 
 // Set location
-float lat=0.0;
-float lon=0.0;
+//float lat=0.0;
+//float lon=0.0;
+float lat=25.0991;
+float lon=55.1604;
 int   alt=0;
 
 /* Informal status fields */
@@ -85,7 +119,8 @@ static char description[64] = "";                        /* used for free form d
 
 // define servers
 // TODO: use host names and dns
-#define SERVER1 "54.72.145.119"    // The Things Network: croft.thethings.girovito.nl
+//#define SERVER1 "54.72.145.119"    // The Things Network: croft.thethings.girovito.nl
+#define SERVER1 "75.119.128.125"     // ssi server: ttn.vandestadt.net
 //#define SERVER2 "192.168.1.10"      // local
 #define PORT 1700                   // The port on which to send data
 
@@ -240,7 +275,7 @@ boolean receivePkt(char *payload)
 
 void SetupLoRa()
 {
-    
+
     digitalWrite(RST, HIGH);
     delay(100);
     digitalWrite(RST, LOW);
@@ -396,7 +431,7 @@ void receivepacket() {
                 // Divide by 4
                 SNR = ( value & 0xFF ) >> 2;
             }
-            
+
             if (sx1272) {
                 rssicorr = 139;
             } else {
@@ -458,7 +493,7 @@ void receivepacket() {
             ++buff_index;
             j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, "\"tmst\":%u", tmst);
             buff_index += j;
-            j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"chan\":%1u,\"rfch\":%1u,\"freq\":%.6lf", 0, 0, (double)freq/1000000);
+            j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"chan\":%1u,\"rfch\":%1u,\"freq\":%.6lf", 0, 0, (double)freq2/1000000);
             buff_index += j;
             memcpy((void *)(buff_up + buff_index), (void *)",\"stat\":1", 9);
             buff_index += 9;
@@ -531,6 +566,81 @@ void receivepacket() {
     } // dio0=1
 }
 
+
+
+// JS: send a packet
+// Test procedure to send a package, working on 18 March 2021
+// Unsure about the delay I have put in, apperently there will be an interrupt created when the package is transmitted
+// need to programme the IRQ from the DIO0 port something with the IRQ flags
+
+
+void sendpacket() {
+
+	char Send_Buffer[12];
+
+	// Just send hello world for now, this is to be replaced by actual data
+	memcpy((void *)Send_Buffer, (void *)"Hello World!", 12);
+	printf("Sending: %.12s\n", (char *)Send_Buffer);
+
+        // clear TxDone IRQ
+        writeRegister(REG_IRQ_FLAGS, 0x8);
+
+
+	// Setup operation mode to standby to allow to send data
+	writeRegister(REG_OPMODE, SX72_MODE_STANDBY);
+
+        // TX Init
+	writeRegister(REG_FIFO_TX_BASE_AD, 0);
+	writeRegister(REG_FIFO_ADDR_PTR, 0);
+	writeRegister(REG_PAYLOAD_LENGTH, 12);   //now manually set to 12
+
+        // Write data to FIFO
+	for(int i = 0; i < 12; i++)
+	{
+		writeRegister(REG_FIFO, Send_Buffer[i]);
+	}
+
+        //Mode Request TX
+	writeRegister(REG_OPMODE, SX72_MODE_TX);
+
+        //Wait for IRQTxDone ???? ...need to change this by catching the IRQ flags DIO0?   REG_IRQ_FLAGS??
+	// clear  txDone ?
+//	delay(2000);
+
+	// Change mode to standby, probably not required by going in listening mode
+//	writeRegister(REG_OPMODE, SX72_MODE_STANDBY);
+	// go back to listening mode
+	writeRegister(REG_OPMODE, SX72_MODE_RX_CONTINUOS);
+}
+
+
+
+//check if message is send and then go into standby, need to programme send check status
+void packagesend()
+{
+	// Get IRQ flags
+   	int irqflags = readRegister(REG_IRQ_FLAGS);
+	//Check of TXDone flag is set
+	if(( irqflags & 0x8 ) == 0x8)
+	{
+  		printf("TxDone flag is set, reset flag\n");
+                // clear TxDone IRQ
+                writeRegister(REG_IRQ_FLAGS, 0x8);
+
+                // Change mode to standby, probably not required by going in listening mode
+                writeRegister(REG_OPMODE, SX72_MODE_STANDBY);
+	}
+
+}
+
+
+
+
+
+
+
+
+// Main programme
 int main () {
 
     struct timeval nowtime;
@@ -541,7 +651,7 @@ int main () {
     pinMode(dio0, INPUT);
     pinMode(RST, OUTPUT);
 
-    //int fd = 
+    //int fd =
     wiringPiSPISetup(CHANNEL, 500000);
     //cout << "Init result: " << fd << endl;
 
@@ -573,21 +683,26 @@ int main () {
 
     while(1) {
 
-        receivepacket();
+// DO not check for a received packet
+//        receivepacket();
 
         gettimeofday(&nowtime, NULL);
         uint32_t nowseconds = (uint32_t)(nowtime.tv_sec);
         if (nowseconds - lasttime >= 30) {
             lasttime = nowseconds;
-            sendstat();
+            // Do not send status
+            //sendstat();
+	    // Instead send a packet every 30 seconds to emulate a node
+            sendpacket();
             cp_nb_rx_rcv = 0;
             cp_nb_rx_ok = 0;
             cp_up_pkt_fwd = 0;
         }
+        // Check if package has been send TxDone to alow next package to be send
+        packagesend();
         delay(1);
     }
 
     return (0);
 
 }
-
