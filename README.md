@@ -1,3 +1,9 @@
+*** UPDATE ***
+
+city028: Making some updates to fit my needs for testing purposes, will provide more details later on.
+
+Thanks
+
 *** IMPORTANT ***
 
 Please note this repository is deprecated, and the code is not up-to-date to use on The Things Network.
