@@ -577,6 +577,7 @@ void UDP_Receive( void )
 
   //printf("Before recvfrom\n");
 
+
   inet_aton(SERVER1 , &cliaddr.sin_addr);
   //NumBytes = recvfrom(s, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
   NumBytes = recvfrom(s, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
