@@ -29,12 +29,17 @@
  #include <sys/ioctl.h>
  #include <net/if.h>
 
+ #include <fcntl.h> /* Added for the nonblocking socket */
+
  using namespace std;
 
  #include "base64.h"
 
  #include <wiringPi.h>
  #include <wiringPiSPI.h>
+
+
+ #define MAXLINE 1024
 
  typedef bool boolean;
  typedef unsigned char byte;
@@ -45,6 +50,8 @@
 
  char message[256];
  char b64[256];
+
+
 
  bool sx1272 = true;
 
@@ -548,13 +555,17 @@
 void UDP_Receive( void )
 {
 
-  char buffer[1024];  // Receive buffer
-  unsigned int len, NumBytes = 0;
+  char buffer[MAXLINE];  // Receive buffer
+  char AddrBuff[INET_ADDRSTRLEN];
+  unsigned int len = 0;
+  int NumBytes = 0;
+  struct iovec  iov[1];
   struct sockaddr_in cliaddr;
 
-struct sockaddr_storage src_addr;
+  struct sockaddr_storage src_addr;
 
   struct msghdr message;
+
   message.msg_name=&src_addr;
   message.msg_namelen=sizeof(src_addr);
   message.msg_iov=iov;
@@ -564,20 +575,31 @@ struct sockaddr_storage src_addr;
 
   len = sizeof(cliaddr);  //len is value/result
 
-  printf("Before peek\n");
+  //printf("Before recvfrom\n");
 
-  //inet_aton(SERVER1 , &cliaddr.sin_addr);
-  //NumBytes = recvfrom(s, (char *)buffer, 0, MSG_PEEK, ( struct sockaddr *) &cliaddr, &len);
+  inet_aton(SERVER1 , &cliaddr.sin_addr);
+  //NumBytes = recvfrom(s, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
+  NumBytes = recvfrom(s, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
+  //printf("After recfrom\n");
 
-  NumBytes = recvmsg(s, &message,0);
-
-  printf("After peek\n");
-
-  if(NumBytes)
+  if(NumBytes != -1)
   {
+
+    inet_ntop( AF_INET, &cliaddr.sin_addr, AddrBuff, sizeof( AddrBuff ));
+    printf("UDP_Receive: Message received from: %s \n", AddrBuff);
+
     printf("UDP_Receive: Number of UDP Bytes received: %d\n", NumBytes );
-    printf("UDP_Receive: len received : %d\n", len );
+    for(unsigned int i =0; i< (unsigned int)NumBytes;++i)
+    {
+      printf("Byte : %d, Value : %d\n",i,buffer[i]);
+    }
   }
+  else
+  {
+    //printf("Nothing received\n");
+  }
+
+
 }
 
  int main () {
@@ -606,7 +628,9 @@ struct sockaddr_storage src_addr;
      {
        printf("bind failed\n");
        die("socket bind");
-      }
+     }
+
+     fcntl(s, F_SETFL, O_NONBLOCK); /* Change the socket into non-blocking state        */
 
 
      memset((char *) &si_other, 0, sizeof(si_other));
@@ -638,7 +662,7 @@ struct sockaddr_storage src_addr;
 
          gettimeofday(&nowtime, NULL);
          uint32_t nowseconds = (uint32_t)(nowtime.tv_sec);
-         if (nowseconds - lasttime >= 30) {
+         if (nowseconds - lasttime >= 120) {
              lasttime = nowseconds;
              sendstat();
              cp_nb_rx_rcv = 0;
