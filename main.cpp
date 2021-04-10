@@ -103,6 +103,7 @@
  // TODO: use host names and dns
  //#define SERVER1 "54.72.145.119"    // The Things Network: croft.thethings.girovito.nl
  #define SERVER1 "75.119.128.125"     // ssi server: ttn.vandestadt.net
+ //#define SERVER1 "172.19.0.5"           // using the VPN
  //#define SERVER2 "192.168.1.10"      // local
  #define PORT 1700                   // The port on which to send data
 
@@ -578,6 +579,8 @@ void UDP_Receive( void )
   //printf("Before recvfrom\n");
 
 
+
+
   inet_aton(SERVER1 , &cliaddr.sin_addr);
   //NumBytes = recvfrom(s, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
   NumBytes = recvfrom(s, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
@@ -588,6 +591,7 @@ void UDP_Receive( void )
 
     inet_ntop( AF_INET, &cliaddr.sin_addr, AddrBuff, sizeof( AddrBuff ));
     printf("UDP_Receive: Message received from: %s \n", AddrBuff);
+    printf("UDP_Reveive: Address lenth: %d\n", len );
 
     printf("UDP_Receive: Number of UDP Bytes received: %d\n", NumBytes );
     for(unsigned int i =0; i< (unsigned int)NumBytes;++i)
@@ -625,11 +629,11 @@ void UDP_Receive( void )
      }
 
      // Bind the socket with the server address
-     if ( bind(s, (struct sockaddr *) &si_other, sizeof(si_other)) < 0 )
-     {
-       printf("bind failed\n");
-       die("socket bind");
-     }
+     //if ( bind(s, (struct sockaddr *) &si_other, sizeof(si_other)) < 0 )
+     //{
+      // printf("bind failed\n");
+       //die("socket bind");
+    // }
 
      fcntl(s, F_SETFL, O_NONBLOCK); /* Change the socket into non-blocking state        */
 
@@ -663,7 +667,7 @@ void UDP_Receive( void )
 
          gettimeofday(&nowtime, NULL);
          uint32_t nowseconds = (uint32_t)(nowtime.tv_sec);
-         if (nowseconds - lasttime >= 120) {
+         if (nowseconds - lasttime >= 30) {
              lasttime = nowseconds;
              sendstat();
              cp_nb_rx_rcv = 0;
