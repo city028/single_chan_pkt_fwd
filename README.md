@@ -1,6 +1,30 @@
 *** UPDATE ***
 
-city028: Making some updates to fit my needs for testing purposes, will provide more details later on.
+city028:
+
+Making some updates to fit my needs for testing purposes, will provide more details later on.
+
+Ok, found an important clue on how the UDP exchange between server and gateway is supposed to work:
+
+https://github.com/Lora-net/packet_forwarder/blob/master/PROTOCOL.TXT
+
+The 4 bytes I was receiving seems to be the PushAck...to be continued
+
+Need to install a JSON library e.g. https://github.com/json-c/json-c
+
+sudo apt update -y
+
+sudo apt upgrade -y
+
+sudo apt-get install libjson-c-dev
+
+add the lib to the make file: LIBS=-lwiringPi -ljson-c
+
+Now able to read the PULL_RESP package, b64 decode it
+
+10 April 2021, Next: send decoded package using lora, this process is not implemented in the single channel packet forwarde so I need to write it
+
+To be continued
 
 Thanks
 
@@ -19,10 +43,10 @@ channel LoRaWAN gateway.
 It has been tested on the Raspberry Pi platform, using a Semtech SX1272
 transceiver (HopeRF RFM92W), and SX1276 (HopeRF RFM95W).
 
-The code is for testing and development purposes only, and is not meant 
-for production usage. 
+The code is for testing and development purposes only, and is not meant
+for production usage.
 
-Part of the source has been copied from the Semtech Packet Forwarder 
+Part of the source has been copied from the Semtech Packet Forwarder
 (with permission).
 
 Features
@@ -41,7 +65,7 @@ Not (yet) supported:
 Dependencies
 ------------
 - SPI needs to be enabled on the Raspberry Pi (use raspi-config)
-- WiringPi: a GPIO access library written in C for the BCM2835 
+- WiringPi: a GPIO access library written in C for the BCM2835
   used in the Raspberry Pi.
   sudo apt-get install wiringpi
   see http://wiringpi.com
@@ -51,7 +75,7 @@ Connections
 -----------
 SX1272 - Raspberry
 
-3.3V   - 3.3V (header pin #1) 
+3.3V   - 3.3V (header pin #1)
 GND	   - GND (pin #6)
 MISO   - MISO (pin #21)
 MOSI   - MOSI (pin #19)

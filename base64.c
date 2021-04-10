@@ -102,7 +102,7 @@ int bin_to_b64_nopad(const uint8_t * in, int size, char * out, int max_len) {
 	int last_bytes; /* number of unsigned chars <3 in the last block */
 	int last_chars; /* number of characters <4 in the last block */
 	uint32_t b;
-	
+
 	/* check input values */
 	if ((out == NULL) || (in == NULL)) {
 		DEBUG("ERROR: NULL POINTER AS OUTPUT IN BIN_TO_B64\n");
@@ -112,7 +112,7 @@ int bin_to_b64_nopad(const uint8_t * in, int size, char * out, int max_len) {
 		*out = 0; /* null string */
 		return 0;
 	}
-	
+
 	/* calculate the number of base64 'blocks' */
 	full_blocks = size / 3;
 	last_bytes = size % 3;
@@ -129,14 +129,14 @@ int bin_to_b64_nopad(const uint8_t * in, int size, char * out, int max_len) {
 		default:
 			CRIT("switch default that should not be possible");
 	}
-	
+
 	/* check if output buffer is big enough */
 	result_len = (4*full_blocks) + last_chars;
 	if (max_len < (result_len + 1)) { /* 1 char added for string terminator */
 		DEBUG("ERROR: OUTPUT BUFFER TOO SMALL IN BIN_TO_B64\n");
 		return -1;
 	}
-	
+
 	/* process all the full blocks */
 	for (i=0; i < full_blocks; ++i) {
 		b  = (0xFF & in[3*i]    ) << 16;
@@ -147,7 +147,7 @@ int bin_to_b64_nopad(const uint8_t * in, int size, char * out, int max_len) {
 		out[4*i + 2] = code_to_char((b >> 6 ) & 0x3F);
 		out[4*i + 3] = code_to_char( b        & 0x3F);
 	}
-	
+
 	/* process the last 'partial' block and terminate string */
 	i = full_blocks;
 	if (last_chars == 0) {
@@ -165,7 +165,7 @@ int bin_to_b64_nopad(const uint8_t * in, int size, char * out, int max_len) {
 		out[4*i + 2] = code_to_char((b >> 6 ) & 0x3F);
 		out[4*i + 3] = 0; /* null character to terminate string */
 	}
-	
+
 	return result_len;
 }
 
@@ -177,16 +177,16 @@ int b64_to_bin_nopad(const char * in, int size, uint8_t * out, int max_len) {
 	int last_bytes; /* number of unsigned chars <3 in the last block */
 	uint32_t b;
 	;
-	
+
 	/* check input values */
 	if ((out == NULL) || (in == NULL)) {
-		DEBUG("ERROR: NULL POINTER AS OUTPUT OR INPUT IN B64_TO_BIN\n");
+		printf("ERROR: NULL POINTER AS OUTPUT OR INPUT IN B64_TO_BIN\n");
 		return -1;
 	}
 	if (size == 0) {
 		return 0;
 	}
-	
+
 	/* calculate the number of base64 'blocks' */
 	full_blocks = size / 4;
 	last_chars = size % 4;
@@ -195,7 +195,7 @@ int b64_to_bin_nopad(const char * in, int size, uint8_t * out, int max_len) {
 			last_bytes = 0;
 			break;
 		case 1: /* only 1 char left is an error */
-			DEBUG("ERROR: ONLY ONE CHAR LEFT IN B64_TO_BIN\n");
+			printf("ERROR: ONLY ONE CHAR LEFT IN B64_TO_BIN\n");
 			return -1;
 		case 2: /* 2 chars left to decode -> +1 byte */
 			last_bytes = 1;
@@ -204,16 +204,16 @@ int b64_to_bin_nopad(const char * in, int size, uint8_t * out, int max_len) {
 			last_bytes = 2;
 			break;
 		default:
-			CRIT("switch default that should not be possible");
+			printf("switch default that should not be possible");
 	}
-	
+
 	/* check if output buffer is big enough */
 	result_len = (3*full_blocks) + last_bytes;
 	if (max_len < result_len) {
-		DEBUG("ERROR: OUTPUT BUFFER TOO SMALL IN B64_TO_BIN\n");
+		printf("ERROR: OUTPUT BUFFER TOO SMALL IN B64_TO_BIN\n");
 		return -1;
 	}
-	
+
 	/* process all the full blocks */
 	for (i=0; i < full_blocks; ++i) {
 		b  = (0x3F & char_to_code(in[4*i]    )) << 18;
@@ -224,7 +224,7 @@ int b64_to_bin_nopad(const char * in, int size, uint8_t * out, int max_len) {
 		out[3*i + 1] = (b >> 8 ) & 0xFF;
 		out[3*i + 2] =  b        & 0xFF;
 	}
-	
+
 	/* process the last 'partial' block */
 	i = full_blocks;
 	if (last_bytes == 1) {
@@ -244,18 +244,18 @@ int b64_to_bin_nopad(const char * in, int size, uint8_t * out, int max_len) {
 			DEBUG("WARNING: last character contains unusable bits\n");
 		}
 	}
-	
+
 	return result_len;
 }
 
 int bin_to_b64(const uint8_t * in, int size, char * out, int max_len) {
 	int ret;
-	
+
 	ret = bin_to_b64_nopad(in, size, out, max_len);
-	
+
 	if (ret == -1) {
 		return -1;
-	}	
+	}
 	switch (ret%4) {
 		case 0: /* nothing to do */
 			return ret;
@@ -288,7 +288,7 @@ int bin_to_b64(const uint8_t * in, int size, char * out, int max_len) {
 
 int b64_to_bin(const char * in, int size, uint8_t * out, int max_len) {
 	if (in == NULL) {
-		DEBUG("ERROR: NULL POINTER AS OUTPUT OR INPUT IN B64_TO_BIN\n");
+		printf("ERROR: NULL POINTER AS OUTPUT OR INPUT IN B64_TO_BIN\n");
 		return -1;
 	}
 	if ((size%4 == 0) && (size >= 4)) { /* potentially padded Base64 */
