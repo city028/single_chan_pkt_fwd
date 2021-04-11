@@ -43,9 +43,6 @@ sf_t sf = SF7;
 // End of user defined variables!
 
 
-
-
-
 // HAL Variables
 int RST   = 0;
 bool sx1272 = true;
@@ -53,6 +50,62 @@ bool sx1272 = true;
 // SX1272 - Raspberry connections
 int ssPin = 6;
 int dio0  = 7;
+
+/**
+* __Function__: HAL_Init
+*
+* __Description__: Initalise Hardware Abstraction Layer (HAL)
+*
+* __Input__: void
+*
+* __Output__: Error code: 0 = no error, 1 =
+*
+* __Status__: Work in Progress
+*
+* __Remarks__:
+*/
+int HAL_Init( void )
+{
+  printf("HAL_Init: Started!\n");
+
+  wiringPiSetup ();
+  pinMode(ssPin, OUTPUT);
+  pinMode(dio0, INPUT);
+  pinMode(RST, OUTPUT);
+
+  wiringPiSPISetup(CHANNEL, 500000);
+
+  if( HAL_SetupLoRa() != 0)
+  {
+    // ERROR
+    return 1;
+  }
+
+  return 0;
+}
+
+/**
+* __Function__: HAL_Engine
+*
+* __Description__: HAL procedures to be called in the main loop
+*
+* __Input__: void
+*
+* __Output__: Error code: 0 = no error, 1 =
+*
+* __Status__: Work in Progress
+*
+* __Remarks__:
+*/
+int HAL_Engine(void)
+{
+
+  /// Checking for received RF Packets
+  HAL_ReceivePacket();
+
+  return 0;
+}
+
 
 
 /**
@@ -141,38 +194,7 @@ void HAL_unselectreceiver()
     digitalWrite(ssPin, HIGH);
 }
 
-/**
-* __Function__: HAL_Init
-*
-* __Description__: Initalise Hardware Abstraction Layer (HAL)
-*
-* __Input__: void
-*
-* __Output__: Error code: 0 = no error, 1 =
-*
-* __Status__: Work in Progress
-*
-* __Remarks__:
-*/
-int HAL_Init( void )
-{
-  printf("HAL_Init: Started!\n");
 
-  wiringPiSetup ();
-  pinMode(ssPin, OUTPUT);
-  pinMode(dio0, INPUT);
-  pinMode(RST, OUTPUT);
-
-  wiringPiSPISetup(CHANNEL, 500000);
-
-  if( HAL_SetupLoRa() != 0)
-  {
-    // ERROR
-    return 1;
-  }
-
-  return 0;
-}
 
 
 /**

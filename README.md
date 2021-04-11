@@ -1,6 +1,7 @@
 *** UPDATE ***
 
-city028:
+The code is for testing and development purposes only, and is not meant
+for production usage.
 
 Making some updates to fit my needs for testing purposes, will provide more details later on.
 
@@ -30,9 +31,7 @@ Thanks
 
 *** IMPORTANT ***
 
-Please note this repository is deprecated, and the code is not up-to-date to use on The Things Network.
-
-This repository will not be further maintained. Please find another repository if you want to deploy a single channel gateway.
+Below the original readme text which I will update in due cause.
 
 
 Single Channel LoRaWAN Gateway
