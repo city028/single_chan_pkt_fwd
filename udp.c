@@ -1,3 +1,19 @@
+/*******************************************************************************
+ *
+ * Making some changes to the below code, orignial credits, see below!!
+ *
+ *******************************************************************************/
+/*******************************************************************************
+ *
+ * Copyright (c) 2015 Thomas Telkamp
+ *
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the Eclipse Public License v1.0
+ * which accompanies this distribution, and is available at
+ * http://www.eclipse.org/legal/epl-v10.html
+ *
+ *******************************************************************************/
+
 /**
 *
 * __Description__:
@@ -6,6 +22,7 @@
 * call UDP_Engine in the main loop of the programme to process any packages
 *
 */
+
 #include <string>
 #include <stdio.h>
 #include <sys/types.h>
@@ -20,39 +37,10 @@
 #include <cstring>           // Required form memcpy
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <fcntl.h> /* Added for the nonblocking socket */
 #include "hal.h"
 #include "base64.h"
-
-/// Define your server IP address below
-//#define SERVER "54.72.145.119"       // The Things Network: croft.thethings.girovito.nl
-//#define SERVER "75.119.128.125"      // My test VPS running TTS
-#define SERVER "172.19.0.5"            // using the VPN to my VPS running TTS
-//#define SERVER "192.168.1.10"        // local
-
-#define PORT 1700                      // The port on which to send data
-
-#define MAXLINE 1024
-
-
-#define BUFLEN 2048  //Max length of buffer
-
-#define PROTOCOL_VERSION  2      // Found a description of version 2 so that is what I will be using
-
-#define PKT_PUSH_DATA    0
-#define PKT_PUSH_ACK     1
-#define PKT_PULL_DATA    2
-#define PKT_PULL_RESP    3
-#define PKT_PULL_ACK     4
-#define PKT_TX_ACK       5
-
-#define PULL_DATA_PKT_LEN 12
-
-#define TX_BUFF_SIZE     2048
-#define STATUS_SIZE      1024
-
-#define TMR_TX_PULL       5     /// Send data pull request every 5 seconds
-#define TMR_STAT_TX       30    /// Send gateway status every 30 seconds
-
+#include "udp.h"
 
 typedef bool boolean;
 typedef unsigned char byte;
@@ -104,32 +92,42 @@ typedef unsigned char byte;
  */
 int UDP_init( void )
 {
-       if ( (s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
-       {
-           return -1;     /// Error code: -1 = socket error
-       }
+  int sf = 0;
+  uint32_t freq = 0;
 
-       fcntl(s, F_SETFL, O_NONBLOCK);       /// Change the socket into non-blocking state
+  if ( (s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+  {
+    printf("UDP_init: Error creating a socket!\n");
+    return -1;     /// Error code: -1 = socket error
+  }
 
-       memset((char *) &si_other, 0, sizeof(si_other));
-       si_other.sin_family = AF_INET;
-       si_other.sin_port = htons(PORT);
+  fcntl(s, F_SETFL, O_NONBLOCK);       /// Change the socket into non-blocking state
 
-       ifr.ifr_addr.sa_family = AF_INET;
-       strncpy(ifr.ifr_name, "eth0", IFNAMSIZ-1);  // can we rely on eth0?
-       ioctl(s, SIOCGIFHWADDR, &ifr);
+  memset((char *) &si_other, 0, sizeof(si_other));
+  si_other.sin_family = AF_INET;
+  si_other.sin_port = htons(PORT);
 
-       /* display result */
-       printf("Gateway ID: %.2x:%.2x:%.2x:ff:ff:%.2x:%.2x:%.2x\n",
-              (unsigned char)ifr.ifr_hwaddr.sa_data[0],
-              (unsigned char)ifr.ifr_hwaddr.sa_data[1],
-              (unsigned char)ifr.ifr_hwaddr.sa_data[2],
-              (unsigned char)ifr.ifr_hwaddr.sa_data[3],
-              (unsigned char)ifr.ifr_hwaddr.sa_data[4],
-              (unsigned char)ifr.ifr_hwaddr.sa_data[5]);
+  ifr.ifr_addr.sa_family = AF_INET;
+  strncpy(ifr.ifr_name, "eth0", IFNAMSIZ-1);  // can we rely on eth0?
+  ioctl(s, SIOCGIFHWADDR, &ifr);
 
-       printf("Listening at SF%i on %.6lf Mhz.\n", sf,(double)freq/1000000);
-       printf("------------------\n");
+  // display result
+  printf("Gateway ID: %.2x:%.2x:%.2x:ff:ff:%.2x:%.2x:%.2x\n",
+    (unsigned char)ifr.ifr_hwaddr.sa_data[0],
+    (unsigned char)ifr.ifr_hwaddr.sa_data[1],
+    (unsigned char)ifr.ifr_hwaddr.sa_data[2],
+    (unsigned char)ifr.ifr_hwaddr.sa_data[3],
+    (unsigned char)ifr.ifr_hwaddr.sa_data[4],
+    (unsigned char)ifr.ifr_hwaddr.sa_data[5]);
+
+
+  sf = HAL_GetSF();
+  freq = HAL_GetFreq();
+
+  printf("Listening at SF%i on %.6lf Mhz.\n", sf,(double)freq/1000000);
+  printf("------------------\n");
+
+  return 0;
 }
 
 
@@ -409,7 +407,7 @@ int UDP_SendPullDataTMR()
      printf("stat update: %s\n", (char *)(status_report+12)); /* DEBUG: display JSON stat */
 
      //send the update
-     sendudp(status_report, stat_index);
+     UDP_SendUDP(status_report, stat_index);
 
  }
 
@@ -460,9 +458,14 @@ int UDP_SendPullDataTMR()
 
    // Send package
    buff_index = PULL_DATA_PKT_LEN;
-   sendudp(buff_up, buff_index);
+   UDP_SendUDP(buff_up, buff_index);
 
    fflush(stdout);
 
    return 0;
  }
+
+char UDP_GetProtoVersion( void )
+{
+  return PROTOCOL_VERSION;
+}

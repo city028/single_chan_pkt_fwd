@@ -23,7 +23,7 @@ add the lib to the make file: LIBS=-lwiringPi -ljson-c
 
 Now able to read the PULL_RESP package, b64 decode it
 
-10 April 2021, Next: send decoded package using lora, this process is not implemented in the single channel packet forwarde so I need to write it
+10 April 2021, Next: send decoded package using lora, this process is not implemented in the single channel packet forwarder so I need to write it
 
 To be continued
 

@@ -18,33 +18,16 @@
  #include "hal.h"
  #include "udp.h"
 
-
- using namespace std;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+ //using namespace std;
 
 // Main programme with loop the loop
  int main ()
  {
-
      // Initialise the Hardware Abstraction Layer (HAL)
      HAL_Init();
 
      // Initalise the UDP Packet forwarder
      UDP_Init();
-
 
      // Loop the loop
      while(1) {

@@ -18,6 +18,11 @@ void HAL_writeRegister(byte addr, byte value);
 void HAL_selectreceiver(void);
 void HAL_unselectreceiver(void);
 void HAL_packagesend(void);
+int HAL_Engine(void);
+int HAL_GetSF( void );
+uint32_t HAL_GetFreq( void );
+bool HAL_ReceivePkt(char *payload);
+void HAL_ReceivePacket(void);
 
 #define REG_FIFO                    0x00
 #define REG_FIFO_ADDR_PTR           0x0D
@@ -63,6 +68,7 @@ void HAL_packagesend(void);
 #define LNA_OFF_GAIN                0x00
 #define LNA_LOW_GAIN		    	      0x20
 
+#define TX_BUFF_SIZE                2048          /// Double check this
 
 /**
 * Channel number constant

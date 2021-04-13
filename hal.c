@@ -2,10 +2,11 @@
  * hardware Abstraction Layer (HAL)
  *
  * Used base source code from other authors, see credits below but I have
- * modified it to suit my own needs
+ * modified it to suit my own needs.
+ *
+ * Dependencies: wiringPi
  *
  *******************************************************************************/
-
 
  /*******************************************************************************
  *
@@ -17,21 +18,17 @@
  * http://www.eclipse.org/legal/epl-v10.html
  *
  *******************************************************************************/
-
 #include <stdio.h>
 #include <stdint.h>           // Required for unint8 etc
 #include <wiringPi.h>         // Required for using wiringPi
 #include <wiringPiSPI.h>      // Required for using SPI
-//#include "os.h"               // Used for print frame
-#include "hal.h"             // The header file for this
-
-
+#include "hal.h"              // The header file for this
+#include "base64.h"
+#include "udp.h"
 
 /**
 *
 * User defined variables below!
-*
-* uint32_t  freq = 868100000;   /// in Mhz! (868.1) = 868Mhz channel 1
 *
 */
 uint32_t  freq = 433175000;     /// in Mhz! (433.175) = 433Mhz channel 1
@@ -51,6 +48,13 @@ bool sx1272 = true;
 int ssPin = 6;
 int dio0  = 7;
 
+// Message buffer
+char message[256];
+char b64[256];
+
+// Received number of bytes by RF
+byte receivedbytes;
+
 /**
 * __Function__: HAL_Init
 *
@@ -68,6 +72,7 @@ int HAL_Init( void )
 {
   printf("HAL_Init: Started!\n");
 
+  // Initialise wiringpi
   wiringPiSetup ();
   pinMode(ssPin, OUTPUT);
   pinMode(dio0, INPUT);
@@ -78,6 +83,7 @@ int HAL_Init( void )
   if( HAL_SetupLoRa() != 0)
   {
     // ERROR
+    printf("HAL_Init: Error in setting up Lora!\n");
     return 1;
   }
 
@@ -99,9 +105,12 @@ int HAL_Init( void )
 */
 int HAL_Engine(void)
 {
-
-  /// Checking for received RF Packets
+  // Execute HAL tasks
+  // Checking for received RF Packets
   HAL_ReceivePacket();
+
+  /// TODO: check TX to node, does it need to be in lockstep with node availability?
+  /// Keep track of Node RX windows ?
 
   return 0;
 }
@@ -194,9 +203,6 @@ void HAL_unselectreceiver()
     digitalWrite(ssPin, HIGH);
 }
 
-
-
-
 /**
 * __Function__: HAL_SetupLoRa
 *
@@ -282,10 +288,9 @@ int HAL_SetupLoRa( void )
     HAL_writeRegister(REG_LNA, LNA_MAX_GAIN);  // max lna gain
     HAL_writeRegister(REG_OPMODE, SX72_MODE_RX_CONTINUOS);
 
+    // No errors
     return 0;
 }
-
-
 
  /**
  * __Function__: HAL_SendFrame
@@ -353,24 +358,38 @@ void HAL_packagesend()
 	//Check of TXDone flag is set
 	if(( irqflags & 0x8 ) == 0x8)
 	{
-  		printf("HAL_packagesend : TxDone flag is set, reset flag\n");
-                // clear TxDone IRQ
-                HAL_writeRegister(REG_IRQ_FLAGS, 0x8);
+    /// Debug, remove in final version
+    printf("HAL_packagesend : TxDone flag is set, reset flag\n");
+    // clear TxDone IRQ
+    HAL_writeRegister(REG_IRQ_FLAGS, 0x8);
 
-                // Change mode to standby, probably not required by going in listening mode
-                HAL_writeRegister(REG_OPMODE, SX72_MODE_STANDBY);
+    // Change mode to standby, probably not required by going in listening mode
+    HAL_writeRegister(REG_OPMODE, SX72_MODE_STANDBY);
 	}
-
 }
 
-
-void HAL_ReceivePacket() {
-
+/**
+* __Function__: HAL_ReceivePacket
+*
+* __Description__: Check for packets receieved from the RF radio
+*
+* __Input__: void
+*
+* __Output__: void
+*
+* __Status__: Work in Progress
+*
+* __Remarks__:
+*/
+void HAL_ReceivePacket()
+{
     long int SNR;
     int rssicorr;
 
+    // Check DIO0 if there is a package received, if so process if not move on
     if(digitalRead(dio0) == 1)
     {
+        // Message received, process
         if(HAL_ReceivePkt(message)) {
             byte value = HAL_readRegister(REG_PKT_SNR_VALUE);
             if( value & 0x80 ) // The SNR sign bit is 1
@@ -391,6 +410,7 @@ void HAL_ReceivePacket() {
                 rssicorr = 157;
             }
 
+            ///Debug
             printf("Packet RSSI: %d, ",HAL_readRegister(0x1A)-rssicorr);
             printf("RSSI: %d, ",HAL_readRegister(0x1B)-rssicorr);
             printf("SNR: %li, ",SNR);
@@ -399,8 +419,6 @@ void HAL_ReceivePacket() {
 
             int j;
             j = bin_to_b64((uint8_t *)message, receivedbytes, (char *)(b64), 341);
-            //fwrite(b64, sizeof(char), j, stdout);
-
 
            //  Bytes  | Function
            // :------:|---------------------------------------------------------------------
@@ -410,9 +428,6 @@ void HAL_ReceivePacket() {
            //  4-11   | Gateway unique identifier (MAC address)
            //  12-end | JSON object, starting with {, ending with }, see section 4
 
-
-
-
             char buff_up[TX_BUFF_SIZE]; /* buffer to compose the upstream packet */
             int buff_index=0;
 
@@ -421,7 +436,7 @@ void HAL_ReceivePacket() {
             //static uint32_t net_mac_l; /* Least Significant Nibble, network order */
 
             /* pre-fill the data buffer with fixed fields */
-            buff_up[0] = PROTOCOL_VERSION;
+            buff_up[0] = UDP_GetProtoVersion();
             buff_up[3] = PKT_PUSH_DATA;
 
             /* process some of the configuration variables */
@@ -532,7 +547,19 @@ void HAL_ReceivePacket() {
 }
 
 
-
+/**
+* __Function__: HAL_ReceivePkt
+*
+* __Description__: Package has been received, copy to payload buffer
+*
+* __Input__: Pointer to payload buffer
+*
+* __Output__: bool, False = error, True = no error (change this to int)
+*
+* __Status__: Work in Progress
+*
+* __Remarks__:
+*/
 boolean HAL_ReceivePkt(char *payload)
 {
 
@@ -565,4 +592,66 @@ boolean HAL_ReceivePkt(char *payload)
         }
     }
     return true;
+}
+
+
+/**
+* __Function__: HAL_GetSF
+*
+* __Description__: In case outer layers, such as UDP need to understand the spreading factor the RF is using
+*
+* __Input__: int -1 = Error else SF
+*
+* __Output__: uint32_t Frequency
+*
+* __Status__: Work in Progress
+*
+* __Remarks__:
+*/
+int HAL_GetSF( void )
+{
+  int SpreadingFactor;
+  switch (sf) {
+    case SF7:
+      SpreadingFactor = 7;
+    break;
+    case SF8:
+      SpreadingFactor = 8;
+    break;
+    case SF9:
+      SpreadingFactor = 9;
+    break;
+    case SF10:
+      SpreadingFactor = 10;
+    break;
+    case SF11:
+      SpreadingFactor = 11;
+    break;
+    case SF12:
+      SpreadingFactor = 12;
+    break;
+    default:
+      printf("HAL_GetSF: Error: no such spreading factor!\n");
+      SpreadingFactor = -1;
+  }
+  return SpreadingFactor;
+}
+
+
+/**
+* __Function__: HAL_GetFreq
+*
+* __Description__: In case outer layers, such as UDP need to understand the frequency the RF is listening to
+*
+* __Input__: void
+*
+* __Output__: uint32_t Frequency
+*
+* __Status__: Work in Progress
+*
+* __Remarks__:
+*/
+uint32_t HAL_GetFreq( void )
+{
+  return freq;
 }
