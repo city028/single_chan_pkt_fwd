@@ -17,6 +17,7 @@
  #include <stdio.h>
  #include "hal.h"
  #include "udp.h"
+ #include "gateway.h"
 
  //using namespace std;
 
@@ -29,6 +30,9 @@
      // Initalise the UDP Packet forwarder
      UDP_Init();
 
+     // Initialise the application, in this case the Gateway
+     GW_Init();
+
      // Loop the loop
      while(1) {
          // Execute the HAL engine in the main loop
@@ -36,6 +40,9 @@
 
          // Execute the UDP engine in the main loop
          UDP_Engine();
+
+         // Execute the Gateway engine in the main Loop
+         GW_Engine();
 
          // not to go crasy with the calls
          delay(1);

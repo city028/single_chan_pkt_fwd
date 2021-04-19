@@ -32,21 +32,10 @@ char UDP_GetProtoVersion( void );
 
 #define BUFLEN 2048  //Max length of buffer
 
-#define PROTOCOL_VERSION  2      // Found a description of version 2 so that is what I will be using
 
-#define PKT_PUSH_DATA    0
-#define PKT_PUSH_ACK     1
-#define PKT_PULL_DATA    2
-#define PKT_PULL_RESP    3
-#define PKT_PULL_ACK     4
-#define PKT_TX_ACK       5
 
-#define PULL_DATA_PKT_LEN 12
 
-#define TX_BUFF_SIZE     2048
-#define STATUS_SIZE      1024
 
-#define TMR_TX_PULL       5     /// Send data pull request every 5 seconds
-#define TMR_STAT_TX       30    /// Send gateway status every 30 seconds
+
 
 #endif // _udp_hpp_

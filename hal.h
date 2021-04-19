@@ -68,7 +68,10 @@ void HAL_ReceivePacket(void);
 #define LNA_OFF_GAIN                0x00
 #define LNA_LOW_GAIN		    	      0x20
 
-#define TX_BUFF_SIZE                2048          /// Double check this
+
+
+
+
 
 /**
 * Channel number constant
