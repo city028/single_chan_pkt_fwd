@@ -10,6 +10,10 @@ int GW_Init(void);
 int GW_Engine(void);
 int GW_SendGWStatusUpate(void);
 int GW_SendPullDataTMR(void);
+void GW_SendStat(void);
+int GW_SendPullData(void);
+void GW_ProcessRX_UDP(void);
+int GW_ProcessRX_Lora(void);
 
 
 
@@ -58,12 +62,5 @@ enum {
 #define TX_BUFF_SIZE                2048          /// Double check this
 
 #define PULL_DATA_PKT_LEN   12
-
-
-// Set location and altitude
-float lat=0;
-float lon=0;
-int   alt=0;
-
 
 #endif // _gateway_h_

@@ -15,13 +15,12 @@
  *
  *******************************************************************************/
  #include <stdio.h>
- #include "hal.h"
- #include "udp.h"
- #include "gateway.h"
+ #include <wiringPi.h>    // used in this module for the function delay()
+ #include "hal.h"         // Hardware abstraction layer (lora)
+ #include "udp.h"         // UDP Layer definitions
+ #include "gateway.h"     // Application Layer = Gateway definitions
 
- //using namespace std;
-
-// Main programme with loop the loop
+ // Main programme with loop the loop
  int main ()
  {
      // Initialise the Hardware Abstraction Layer (HAL)
@@ -33,7 +32,7 @@
      // Initialise the application, in this case the Gateway
      GW_Init();
 
-     // Loop the loop
+     // Loop the loop, should do exit when there is an error
      while(1) {
          // Execute the HAL engine in the main loop
          HAL_Engine();

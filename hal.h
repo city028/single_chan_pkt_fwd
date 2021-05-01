@@ -22,6 +22,13 @@ int HAL_TransmitFrame(uint8_t *txFrame,int FrameSize);
 */
 int HAL_GetSF( void );
 uint32_t HAL_GetFreq( void );
+long int HAL_GetSNR(void);
+int HAL_GetRssiCor(void);
+uint32_t HAL_GetNumRX(void);
+uint32_t HAL_GetRxOk(void);
+uint32_t HAL_GetRxBad(void);
+uint32_t HAL_GetRxNoCRC(void);
+uint32_t HAL_GetPktWfd(void);
 
 
 /**
@@ -39,8 +46,8 @@ void HAL_unselectreceiver(void);
 void HAL_packagesend(void);
 bool HAL_ReceivePkt(char *payload);
 void HAL_ReceivePacket(void);
-static void HAL_TX_FIFO_Update( void );
-static void HAL_RX_FIFO_Update( void );
+void HAL_TX_FIFO_Update( void );
+void HAL_RX_FIFO_Update( void );
 
 
 

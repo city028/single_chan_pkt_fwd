@@ -20,23 +20,24 @@
  *******************************************************************************/
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <cstring>            // Required for memcpy
+#include <json-c/json.h>     // required for json manipulation
+#include <time.h>
 #include "udp.h"
 #include "hal.h"
 #include "gateway.h"
+#include "base64.h"
 
 
 // Timers
 uint32_t Status_lasttime;     // Send regular status updated from the GW to the server
 uint32_t PushData_lasttime;   // Send PushData frames to keep channel open
 
-// describe the below better
-uint32_t cp_nb_rx_rcv;
-uint32_t cp_nb_rx_ok;
-uint32_t cp_nb_rx_bad;
-uint32_t cp_nb_rx_nocrc;
-uint32_t cp_up_pkt_fwd;
 
 // variable to store mac address of gateway
 struct ifreq GW_ifr;
@@ -46,12 +47,17 @@ static char platform[24]    = "Single Channel Gateway";  /* platform definition 
 static char email[40]       = "";                        /* used for contact email */
 static char description[64] = "";                        /* used for free form description */
 
-byte receivedbytes;
-
 byte currentMode = 0x81;   /// check if this is used
 
-char message[256];
-char b64[256];
+int SpreadingFactor = 0;           // Spreading Factor
+uint32_t LoraFreq = 0;    // Lora Frequency Used
+/// Little hack to get the TTS to think we are working with 868 modules whilst I only have 433 modules....to be replace soon
+double  freq2 = 868100000; // in Mhz! (868.1)
+
+// Set location and altitude
+float lat=0;
+float lon=0;
+int   alt=0;
 
 /**
 * __Function__: GW_Init
@@ -68,21 +74,20 @@ char b64[256];
 */
 int GW_Init(void)
 {
-  int sf = 0;
-  uint32_t freq = 0;
+
 
   // get the Eth0 Mac address as this is used for the Gateway EUI
   UDP_GetEth0Mac(&GW_ifr);
 
 
   // Get the Lora Spreading Factor
-  sf = HAL_GetSF();
+  SpreadingFactor = HAL_GetSF();
   // Get the Lora Frequency used
-  freq = HAL_GetFreq();
+  LoraFreq = HAL_GetFreq();
 
   // Inform the user of the settings of the GW --> later change to Oled
   printf("--------------------------------------------------------\n");
-  printf("Listening at SF%i on %.6lf Mhz.\n", sf,(double)freq/1000000);
+  printf("Listening at SF%i on %.6lf Mhz.\n", SpreadingFactor,(double)LoraFreq/1000000);
   printf("--------------------------------------------------------\n");
   printf("Gateway ID: %.2x:%.2x:%.2x:ff:ff:%.2x:%.2x:%.2x\n",
     (unsigned char)GW_ifr.ifr_hwaddr.sa_data[0],
@@ -157,9 +162,6 @@ int GW_SendGWStatusUpate(void)
   if (nowseconds - Status_lasttime >= TMR_STAT_TX) {
       Status_lasttime = nowseconds;
       GW_SendStat();
-      cp_nb_rx_rcv = 0;
-      cp_nb_rx_ok = 0;
-      cp_up_pkt_fwd = 0;
   }
   return 0;
 }
@@ -187,10 +189,7 @@ int GW_SendPullDataTMR(void)
   if (nowseconds - PushData_lasttime >= TMR_TX_PULL) {
       PushData_lasttime = nowseconds;
       // Send PULL_DATA
-      UDP_SendPullData();
-      cp_nb_rx_rcv = 0;
-      cp_nb_rx_ok = 0;
-      cp_up_pkt_fwd = 0;
+      GW_SendPullData();
   }
   return 0;
 }
@@ -208,12 +207,12 @@ int GW_SendPullDataTMR(void)
 *
 * __Remarks__: Send a status up date to the server
 */
-void GW_SendStat() {
+void GW_SendStat()
+{
 
     static char status_report[STATUS_SIZE]; /* status report as a JSON object */
     char stat_timestamp[24];
     time_t t;
-
     int stat_index=0;
 
     /* pre-fill the data buffer with fixed fields */
@@ -240,7 +239,12 @@ void GW_SendStat() {
     t = time(NULL);
     strftime(stat_timestamp, sizeof stat_timestamp, "%F %T %Z", gmtime(&t));
 
-    int j = snprintf((char *)(status_report + stat_index), STATUS_SIZE-stat_index, "{\"stat\":{\"time\":\"%s\",\"lati\":%.5f,\"long\":%.5f,\"alti\":%i,\"rxnb\":%u,\"rxok\":%u,\"rxfw\":%u,\"ackr\":%.1f,\"dwnb\":%u,\"txnb\":%u,\"pfrm\":\"%s\",\"mail\":\"%s\",\"desc\":\"%s\"}}", stat_timestamp, lat, lon, (int)alt, cp_nb_rx_rcv, cp_nb_rx_ok, cp_up_pkt_fwd, (float)0, 0, 0,platform,email,description);
+    uint32_t NumRx = HAL_GetNumRX();
+    uint32_t RxOk = HAL_GetRxOk();
+    uint32_t PktFwd = HAL_GetPktWfd();
+
+
+    int j = snprintf((char *)(status_report + stat_index), STATUS_SIZE-stat_index, "{\"stat\":{\"time\":\"%s\",\"lati\":%.5f,\"long\":%.5f,\"alti\":%i,\"rxnb\":%u,\"rxok\":%u,\"rxfw\":%u,\"ackr\":%.1f,\"dwnb\":%u,\"txnb\":%u,\"pfrm\":\"%s\",\"mail\":\"%s\",\"desc\":\"%s\"}}", stat_timestamp, lat, lon, (int)alt, NumRx, RxOk, PktFwd, (float)0, 0, 0,platform,email,description);
     stat_index += j;
     status_report[stat_index] = 0; /* add string terminator, for safety */
 
@@ -326,13 +330,13 @@ int GW_SendPullData()
 *
 * __Remarks__: Function to be called from gateway engine
 */
-GW_ProcessRX_UDP()
+void GW_ProcessRX_UDP(void)
 {
   char buffer[MAXLINE];  // Receive buffer
   char JsonPayload[MAXLINE];
   unsigned char RF_Payload[MAXLINE];
   char *RF_B64_Payload_Str;
-  unsigned int len = 0;
+  //unsigned int len = 0;
   int RF_Len, ResultLen = 0;
   int NumBytes = 0;
 
@@ -342,7 +346,7 @@ GW_ProcessRX_UDP()
   struct json_object *PushPacket;
 
   // Change this to get message from UDP FIFO RX Buffer
-  NumBytes = UDP_RetreiveRXfromFIFO((char *)buffer);
+  NumBytes = UDP_ReceiveUDP((char *)buffer);
 
   if(NumBytes != -1)
   {
@@ -414,8 +418,7 @@ GW_ProcessRX_UDP()
          }
          // Ok now we have the decoded package on RF_B64_Payload_Str and the size in RF_Len
          // Only send when node is listening
-         HAL_TransmitFrame(RF_Payload, ResultLen)
-
+         HAL_TransmitFrame(RF_Payload, ResultLen);
 
       break;
 
@@ -458,19 +461,24 @@ GW_ProcessRX_UDP()
 /// JS Clean this up, call HAL to retreive message from Fifo
 int GW_ProcessRX_Lora()
 {
-  char Lora_RX_Message[LORA_RX_MX_FRAME_SIZE];
+  uint8_t Lora_RX_Message[LORA_RX_MX_FRAME_SIZE];
   int RxNumBytes;
-  int BytesProcessed;
+  //int BytesProcessed;
   char buff_up[TX_BUFF_SIZE];   /* buffer to compose the upstream packet */
   int buff_index=0;
   struct timeval now;
   int j;
+  long int snr;
+  int rssicorr;
+
+  snr = HAL_GetSNR();
+  rssicorr = HAL_GetRssiCor();
 
   // Check if there is a Lora message in the Lora FIFO
   if((RxNumBytes = HAL_ReceiveFrame(Lora_RX_Message)) != 1)
   {
-    // Message received, convert to B64 messahe
-    BytesProcessed = bin_to_b64((uint8_t *)Lora_RX_Message, RxNumBytes, (char *)(b64), 341);
+    // Message received, convert to B64 message
+    //BytesProcessed = bin_to_b64(Lora_RX_Message, RxNumBytes, (char *)(b64), 341);
 
     //  Bytes  | Function
     // :------:|---------------------------------------------------------------------
@@ -513,14 +521,14 @@ int GW_ProcessRX_Lora()
     ++buff_index;
     j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, "\"tmst\":%u", tmst);
     buff_index += j;
-    j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"chan\":%1u,\"rfch\":%1u,\"freq\":%.6lf", 0, 0, (double)freq2/1000000);
+    j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"chan\":%1u,\"rfch\":%1u,\"freq\":%.6lf", 0, 0, freq2/1000000);
     buff_index += j;
     memcpy((void *)(buff_up + buff_index), (void *)",\"stat\":1", 9);
     buff_index += 9;
     memcpy((void *)(buff_up + buff_index), (void *)",\"modu\":\"LORA\"", 14);
     buff_index += 14;
     /* Lora datarate & bandwidth, 16-19 useful chars */
-    switch (sf) {
+    switch (SpreadingFactor) {
       case SF7:
           memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF7", 12);
           buff_index += 12;
@@ -553,13 +561,13 @@ int GW_ProcessRX_Lora()
     buff_index += 6;
     memcpy((void *)(buff_up + buff_index), (void *)",\"codr\":\"4/5\"", 13);
     buff_index += 13;
-    j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"lsnr\":%li", SNR);
+    j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"lsnr\":%li", snr);
     buff_index += j;
-    j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"rssi\":%d,\"size\":%u", HAL_readRegister(0x1A)-rssicorr, receivedbytes);
+    j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"rssi\":%d,\"size\":%u", HAL_readRegister(0x1A)-rssicorr, RxNumBytes);
     buff_index += j;
     memcpy((void *)(buff_up + buff_index), (void *)",\"data\":\"", 9);
     buff_index += 9;
-    j = bin_to_b64((uint8_t *)message, receivedbytes, (char *)(buff_up + buff_index), 341);
+    j = bin_to_b64((uint8_t *)Lora_RX_Message, RxNumBytes, (char *)(buff_up + buff_index), 341);    /// Why 341, check it out
     buff_index += j;
     buff_up[buff_index] = '"';
     ++buff_index;

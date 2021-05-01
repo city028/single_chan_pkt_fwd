@@ -56,7 +56,7 @@ char b64[256];
 // Received number of bytes by RF
 byte receivedbytes;
 
-uint32_t cp_nb_rx_rcv;
+uint32_t cp_nb_rx_rcv = 0;
 uint32_t cp_nb_rx_ok;
 uint32_t cp_nb_rx_bad;
 uint32_t cp_nb_rx_nocrc;
@@ -89,7 +89,7 @@ struct LORA_RX_BUFFER_STRUCT {
  uint8_t    LORA_RX_FLAG;                             /**< RX_FLAG: 0 = No frame received, 1 = Frame received */
  byte       LORA_RX_RSSI;
  byte       LORA_RX_PACKET_RSSI;
- long       LORA_RX_SNR;
+ long int   LORA_RX_SNR;
  /// Maybe add other data, flags etc?
 };
 /**
@@ -102,7 +102,8 @@ struct LORA_RX_BUFFER_STRUCT LORA_RX_FIFO_Buffer[LORA_RX_FIFO_DEPTH];
 uint8_t LORA_RX_FIFO_Idx = 0;
 
 
-
+long int SNR;
+int rssicorr;
 
 
 
@@ -474,8 +475,6 @@ void HAL_packagesend()
 */
 int HAL_Process_RX()
 {
-    long int SNR;
-    int rssicorr;
     char Lora_RX_Message[LORA_RX_MX_FRAME_SIZE];
 
     // Check DIO0 if there is a package received, if so process if not move on
@@ -737,7 +736,7 @@ int HAL_TransmitFrame(uint8_t *TxFrame,int FrameSize)
  *
  * __Remarks__: none
  */
-static void HAL_RX_FIFO_Update( void )
+void HAL_RX_FIFO_Update( void )
 {
   int i;
 
@@ -767,7 +766,7 @@ static void HAL_RX_FIFO_Update( void )
 }
 
 /**
- * __Function__: LORA_TX_FIFO_Update
+ * __Function__: HAL_TX_FIFO_Update
  *
  * __Description__: Move frames down the fifo
  *
@@ -779,7 +778,7 @@ static void HAL_RX_FIFO_Update( void )
  *
  * __Remarks__: none
  */
-static void HAL_TX_FIFO_Update( void )
+ void HAL_TX_FIFO_Update( void )
 {
   int i;
 
@@ -806,4 +805,68 @@ static void HAL_TX_FIFO_Update( void )
     // Nothing to do, IDX at 0
     // printf("LW_FIFO_Update: Nothing to do, idx at : 0\n");
   }
+}
+
+
+/**
+ * __Function__: HAL_GetSNR
+ *
+ * __Description__: Get the signa to noice ratio
+ *
+ * __Input__: Void
+ *
+ * __Output__: void
+ *
+ * __Status__: Completed
+ *
+ * __Remarks__: none
+ */
+long int HAL_GetSNR(void)
+{
+  return SNR;
+}
+
+/**
+ * __Function__: HAL_GetRssiCor
+ *
+ * __Description__: Get the RSSI Correction based upon used chip
+ *
+ * __Input__: Void
+ *
+ * __Output__: void
+ *
+ * __Status__: Completed
+ *
+ * __Remarks__: none
+ */
+int HAL_GetRssiCor(void)
+{
+  return rssicorr;
+}
+
+
+uint32_t HAL_GetNumRX(void)
+{
+  return cp_nb_rx_rcv;
+}
+
+
+uint32_t HAL_GetRxOk(void)
+{
+  return cp_nb_rx_ok;
+}
+
+uint32_t HAL_GetRxBad(void)
+{
+  return cp_nb_rx_bad;
+}
+
+uint32_t HAL_GetRxNoCRC(void)
+{
+  return cp_nb_rx_nocrc;
+}
+
+uint32_t HAL_GetPktWfd(void)
+{
+  return cp_up_pkt_fwd;
 }

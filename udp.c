@@ -34,7 +34,6 @@
 #include <iostream>
 #include <cstdlib>
 #include <sys/time.h>
-#include <cstring>
 #include <cstring>            // Required for memcpy
 #include <sys/ioctl.h>
 #include <net/if.h>
