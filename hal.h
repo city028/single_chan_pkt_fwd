@@ -5,12 +5,31 @@
 #ifndef _hal_hpp_
 #define _hal_hpp_
 
+#include <stdint.h>           // Required for unint8 etc
+
 typedef unsigned char byte;
 
 /**
-* HAL Functions and Procedures
+* HAL Public Functions and Procedures
 */
 int HAL_Init( void );
+int HAL_Engine(void);
+int HAL_ReceiveFrame(uint8_t *RxFrame);
+int HAL_TransmitFrame(uint8_t *txFrame,int FrameSize);
+
+/**
+* HAL Supporting Functions and Procedures
+*/
+int HAL_GetSF( void );
+uint32_t HAL_GetFreq( void );
+
+
+/**
+* HAL Private Functions and Procedures
+*/
+int HAL_Process_RX(void);        // Processing Lora receive packages
+int HAL_Process_TX(void);       // Processing Lora Transmit packages
+
 int HAL_SendFrame( uint8_t *TxFrame, byte FrameSize );
 int HAL_SetupLoRa( void );
 byte HAL_readRegister(byte addr);
@@ -18,11 +37,13 @@ void HAL_writeRegister(byte addr, byte value);
 void HAL_selectreceiver(void);
 void HAL_unselectreceiver(void);
 void HAL_packagesend(void);
-int HAL_Engine(void);
-int HAL_GetSF( void );
-uint32_t HAL_GetFreq( void );
 bool HAL_ReceivePkt(char *payload);
 void HAL_ReceivePacket(void);
+static void HAL_TX_FIFO_Update( void );
+static void HAL_RX_FIFO_Update( void );
+
+
+
 
 #define REG_FIFO                    0x00
 #define REG_FIFO_ADDR_PTR           0x0D
@@ -84,7 +105,11 @@ static const int CHANNEL = 0;
 enum sf_t { SF7=7, SF8, SF9, SF10, SF11, SF12 };
 
 
+#define LORA_TX_MX_FRAME_SIZE    1024   // Maximum TX frame length = 1024 --> Double check this!!!!
+#define LORA_TX_FIFO_DEPTH         10   // Max 10 frames in UDP TX buffer
 
+#define LORA_RX_MX_FRAME_SIZE    1024   // Maximum TX frame length = 1024 --> Double check this!!!!
+#define LORA_RX_FIFO_DEPTH         10   // Max 10 frames in UDP TX buffer
 
 
 #endif // _hal_hpp_

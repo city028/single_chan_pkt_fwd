@@ -22,7 +22,6 @@
 #include <stdio.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include "lorawan.h"
 #include "udp.h"
 #include "hal.h"
 #include "gateway.h"
@@ -118,9 +117,8 @@ int GW_Init(void)
 int GW_Engine(void)
 {
 
- // Check on Lora packate received, if yes process and send through UDP_Init
-
-
+ // Check on Lora packet received, if yes process and send through UDP_Init
+ GW_ProcessRX_Lora();
 
  // Check on UDP Packet received, if yes process and forward to LoRa
  GW_ProcessRX_UDP();
@@ -303,16 +301,6 @@ int GW_SendPullData()
   buff_up[10] = (unsigned char)GW_ifr.ifr_hwaddr.sa_data[4];
   buff_up[11] = (unsigned char)GW_ifr.ifr_hwaddr.sa_data[5];
 
-
-  /* display result */
-  // printf("send_pull_data: ID: %.2x:%.2x:%.2x:ff:ff:%.2x:%.2x:%.2x\n",
-  //        (unsigned char)ifr.ifr_hwaddr.sa_data[0],
-  //        (unsigned char)ifr.ifr_hwaddr.sa_data[1],
-  //        (unsigned char)ifr.ifr_hwaddr.sa_data[2],
-  //        (unsigned char)ifr.ifr_hwaddr.sa_data[3],
-  //        (unsigned char)ifr.ifr_hwaddr.sa_data[4],
-  //        (unsigned char)ifr.ifr_hwaddr.sa_data[5]);
-
   // Send Pull data requests to the server
   if( UDP_SendUDP(buff_up, buff_index))
   {
@@ -426,7 +414,7 @@ GW_ProcessRX_UDP()
          }
          // Ok now we have the decoded package on RF_B64_Payload_Str and the size in RF_Len
          // Only send when node is listening
-
+         HAL_TransmitFrame(RF_Payload, ResultLen)
 
 
       break;
@@ -451,4 +439,150 @@ GW_ProcessRX_UDP()
     //printf("Nothing received\n");
   }
 
+}
+
+
+/**
+* __Function__: GW_ProcessRX_Lora
+*
+* __Description__: Gateway check Lora packages received and process
+*
+* __Input__: void
+*
+* __Output__: Error code: 0 = no error, -1 = Socket error
+*
+* __Status__: Work in Progress
+*
+* __Remarks__: Function to be called from gateway engine
+*/
+/// JS Clean this up, call HAL to retreive message from Fifo
+int GW_ProcessRX_Lora()
+{
+  char Lora_RX_Message[LORA_RX_MX_FRAME_SIZE];
+  int RxNumBytes;
+  int BytesProcessed;
+  char buff_up[TX_BUFF_SIZE];   /* buffer to compose the upstream packet */
+  int buff_index=0;
+  struct timeval now;
+  int j;
+
+  // Check if there is a Lora message in the Lora FIFO
+  if((RxNumBytes = HAL_ReceiveFrame(Lora_RX_Message)) != 1)
+  {
+    // Message received, convert to B64 messahe
+    BytesProcessed = bin_to_b64((uint8_t *)Lora_RX_Message, RxNumBytes, (char *)(b64), 341);
+
+    //  Bytes  | Function
+    // :------:|---------------------------------------------------------------------
+    //  0      | protocol version = 2
+    //  1-2    | random token
+    //  3      | PUSH_DATA identifier 0x00
+    //  4-11   | Gateway unique identifier (MAC address)
+    //  12-end | JSON object, starting with {, ending with }, see section 4
+
+    /* pre-fill the data buffer with fixed fields */
+    buff_up[0] = PROTOCOL_VERSION;
+    /* start composing datagram with the header */
+    uint8_t token_h = (uint8_t)rand(); /* random token */
+    uint8_t token_l = (uint8_t)rand(); /* random token */
+    buff_up[1] = token_h;
+    buff_up[2] = token_l;
+    // Add PUSH_Data Identifier
+    buff_up[3] = PKT_PUSH_DATA;
+
+    // Add the gateway unique ID
+    buff_up[4] = (unsigned char)GW_ifr.ifr_hwaddr.sa_data[0];
+    buff_up[5] = (unsigned char)GW_ifr.ifr_hwaddr.sa_data[1];
+    buff_up[6] = (unsigned char)GW_ifr.ifr_hwaddr.sa_data[2];
+    buff_up[7] = 0xFF;
+    buff_up[8] = 0xFF;
+    buff_up[9] = (unsigned char)GW_ifr.ifr_hwaddr.sa_data[3];
+    buff_up[10] = (unsigned char)GW_ifr.ifr_hwaddr.sa_data[4];
+    buff_up[11] = (unsigned char)GW_ifr.ifr_hwaddr.sa_data[5];
+    // Pint index to point 12 in the buffer
+    buff_index = 12; /* 12-byte header */
+
+    // TODO: tmst can jump is time is (re)set, not good.      /// Check this do not understand what is meant here
+    gettimeofday(&now, NULL);
+    uint32_t tmst = (uint32_t)(now.tv_sec*1000000 + now.tv_usec);
+
+    /* start of JSON structure */
+    memcpy((void *)(buff_up + buff_index), (void *)"{\"rxpk\":[", 9);
+    buff_index += 9;
+    buff_up[buff_index] = '{';
+    ++buff_index;
+    j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, "\"tmst\":%u", tmst);
+    buff_index += j;
+    j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"chan\":%1u,\"rfch\":%1u,\"freq\":%.6lf", 0, 0, (double)freq2/1000000);
+    buff_index += j;
+    memcpy((void *)(buff_up + buff_index), (void *)",\"stat\":1", 9);
+    buff_index += 9;
+    memcpy((void *)(buff_up + buff_index), (void *)",\"modu\":\"LORA\"", 14);
+    buff_index += 14;
+    /* Lora datarate & bandwidth, 16-19 useful chars */
+    switch (sf) {
+      case SF7:
+          memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF7", 12);
+          buff_index += 12;
+          break;
+      case SF8:
+          memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF8", 12);
+          buff_index += 12;
+          break;
+      case SF9:
+          memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF9", 12);
+          buff_index += 12;
+          break;
+      case SF10:
+          memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF10", 13);
+          buff_index += 13;
+          break;
+      case SF11:
+          memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF11", 13);
+          buff_index += 13;
+          break;
+      case SF12:
+          memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF12", 13);
+          buff_index += 13;
+          break;
+      default:
+          memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF?", 12);
+          buff_index += 12;
+    }
+    memcpy((void *)(buff_up + buff_index), (void *)"BW125\"", 6);
+    buff_index += 6;
+    memcpy((void *)(buff_up + buff_index), (void *)",\"codr\":\"4/5\"", 13);
+    buff_index += 13;
+    j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"lsnr\":%li", SNR);
+    buff_index += j;
+    j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"rssi\":%d,\"size\":%u", HAL_readRegister(0x1A)-rssicorr, receivedbytes);
+    buff_index += j;
+    memcpy((void *)(buff_up + buff_index), (void *)",\"data\":\"", 9);
+    buff_index += 9;
+    j = bin_to_b64((uint8_t *)message, receivedbytes, (char *)(buff_up + buff_index), 341);
+    buff_index += j;
+    buff_up[buff_index] = '"';
+    ++buff_index;
+
+    /* End of packet serialization */
+    buff_up[buff_index] = '}';
+    ++buff_index;
+    buff_up[buff_index] = ']';
+    ++buff_index;
+    /* end of JSON datagram payload */
+    buff_up[buff_index] = '}';
+    ++buff_index;
+    buff_up[buff_index] = 0; /* add string terminator, for safety */
+
+    printf("GW_ProcessRX_Lora: %s\n", (char *)(buff_up + 12)); /* DEBUG: display JSON payload */
+
+    //send the message using UDP
+    if( UDP_SendUDP(buff_up, buff_index))
+    {
+      printf("GW_ProcessRX_Lora: Error sending UDP \n");
+    }
+
+    fflush(stdout);       /// Why do we need this?
+  } // No message in FIFO
+  return 0;
 }

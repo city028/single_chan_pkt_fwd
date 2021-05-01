@@ -15,10 +15,10 @@ int UDP_SendUDP(char *TxFrame, int FrameSize);  // To be called ny the applicati
 int UDP_GetEth0Mac( struct ifreq *eth0_ifr);    // Get the MAC address of ETH0
 
 // Functions Internal to the UDP Layer
-static void UDP_TX_FIFO_Update( void );
-static void UDP_RX_FIFO_Update( void );
-static int UDP_CheckTX( void );
-static int UDP_CheckRX( void );
+void UDP_TX_FIFO_Update( void );
+void UDP_RX_FIFO_Update( void );
+int UDP_CheckTX( void );
+int UDP_CheckRX( void );
 
 
 /// Define your server IP address below

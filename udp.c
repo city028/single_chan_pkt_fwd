@@ -39,7 +39,6 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <fcntl.h>            // Added for the nonblocking socket
-#include "hal.h"
 #include "base64.h"
 #include "udp.h"
 
@@ -105,9 +104,9 @@ int UDP_Init( void )
 {
   // Init vars
   // Make sure the TX fifo pointer points to the first entry in the fifo
-  LW_TX_FIFO_Idx = 0;
+  UDP_TX_FIFO_Idx = 0;
   // Make sure the RX fifo pointer points to the first entry in the fifo
-  LW_RX_FIFO_Idx = 0;
+  UDP_RX_FIFO_Idx = 0;
 
   // Open Socket
   if (( ServerSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
@@ -116,7 +115,7 @@ int UDP_Init( void )
     return -1;     /// Error code: -1 = socket error
   }
   // Change the socket into non-blocking state
-  fcntl(s, F_SETFL, O_NONBLOCK);
+  fcntl(ServerSocket, F_SETFL, O_NONBLOCK);
 
   memset((char *) &ServerAddr, 0, sizeof(ServerAddr));
   ServerAddr.sin_family = AF_INET;
@@ -128,7 +127,7 @@ int UDP_Init( void )
   // Get the mac address of ETH to be used as gateway address
   ifr.ifr_addr.sa_family = AF_INET;
   strncpy(ifr.ifr_name, "eth0", IFNAMSIZ-1);  // can we rely on eth0?
-  ioctl(s, SIOCGIFHWADDR, &ifr);
+  ioctl(ServerSocket, SIOCGIFHWADDR, &ifr);
 
   return 0;
 }
@@ -177,9 +176,9 @@ int UDP_SendUDP(char *TxFrame, int FrameSize)
 
   // check for space in UDP TX FIFO
   // Buffer Index runs from 0 to UDP_FIFO_DEPTH - 1
-  if(UDP_TX_FIFO_Idx < (UDP_FIFO_DEPTH))
+  if(UDP_TX_FIFO_Idx < (UDP_TX_FIFO_DEPTH))
   {
-    if(FrameSize <= UDP_MX_FRAME_SIZE)
+    if(FrameSize <= UDP_TX_MX_FRAME_SIZE)
     {
       // Copy frame in buffer
       memcpy(UDP_TX_FIFO_Buffer[UDP_TX_FIFO_Idx].UDP_TX_FRAME, TxFrame, FrameSize);
@@ -188,7 +187,7 @@ int UDP_SendUDP(char *TxFrame, int FrameSize)
       UDP_TX_FIFO_Buffer[UDP_TX_FIFO_Idx].UDP_TX_FRAME_SIZE = FrameSize;   // Add frame size
       //printf("LW_AddFrameToTXBuffer: Frame added to buffer at position: %d\n", LW_TX_FIFO_Idx );
       //Increase the fifo index
-      LW_TX_FIFO_Idx++;
+      UDP_TX_FIFO_Idx++;
       // No error, return
       /// The sending of the frame from the UDP TX Fifo is handled in UDP_Engine (UDP_Transmit)
       return 0;
@@ -256,7 +255,7 @@ int UDP_ReceiveUDP( char *RxBuffer )
 */
 int UDP_GetEth0Mac( struct ifreq *eth0_ifr)
 {
- eth0_ifr = ifr;
+ eth0_ifr = &ifr;
  return 0;
 }
 
@@ -273,7 +272,7 @@ int UDP_GetEth0Mac( struct ifreq *eth0_ifr)
 *
 * __Remarks__: Procedure to be called from UDP engine, sending TX frames from the UDP TX FIFO
 */
-static int UDP_CheckTX( void )
+int UDP_CheckTX( void )
 {
   // Check UDP TX fifo
   if( UDP_TX_FIFO_Buffer[0].UDP_TX_FLAG != 0)
@@ -317,7 +316,7 @@ static int UDP_CheckTX( void )
 *
 * __Remarks__: Procedure is called by UDP_Engine to get UDP frames and stores them in the UDP RX FIFO
 */
-static int UDP_CheckRX( void )
+int UDP_CheckRX( void )
 {
   int NumRXBytes = 0;                   // Number of Bytes received
   char RxBuffer[MAXLINE];               // Receive buffer
@@ -328,7 +327,7 @@ static int UDP_CheckRX( void )
   if(UDP_RX_FIFO_Idx < UDP_RX_FIFO_DEPTH)
   {
     // There is space in the UDP RX FIFO so lets get a package
-    NumRXBytes = recvfrom(ServerSocket, (char *)RxBuffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &SenderAddr, &AddressLength));
+    NumRXBytes = recvfrom(ServerSocket, (char *)RxBuffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &SenderAddr, &AddressLength);
 
     /// Do I need to double check the package received is from the server to avoid spoofing ?
 
@@ -372,7 +371,7 @@ static int UDP_CheckRX( void )
  *
  * __Remarks__: none
  */
-static void UDP_TX_FIFO_Update( void )
+void UDP_TX_FIFO_Update( void )
 {
   int i;
 
@@ -390,7 +389,7 @@ static void UDP_TX_FIFO_Update( void )
     //Decrease the fifo index
     UDP_TX_FIFO_Idx--;
     // Make sure the flag is set to 0 to indicate there is space in the buffer
-    UDP_TX_FIFO_Buffer[UDP_FIFO_DEPTH - 1].TX_FLAG = 0;
+    UDP_TX_FIFO_Buffer[UDP_TX_FIFO_DEPTH - 1].UDP_TX_FLAG = 0;
     // printf("LW_FIFO_Update: Updating position : %d to indicate free space!\n", LW_FIFO_DEPTH - 1 );
     // printf("LW_FIFO_Update: New FIFO Idx: %d\n", LW_TX_FIFO_Idx );
   }
@@ -414,7 +413,7 @@ static void UDP_TX_FIFO_Update( void )
  *
  * __Remarks__: none
  */
-static void UDP_RX_FIFO_Update( void )
+void UDP_RX_FIFO_Update( void )
 {
   int i;
 
@@ -432,7 +431,7 @@ static void UDP_RX_FIFO_Update( void )
     //Decrease the fifo index
     UDP_RX_FIFO_Idx--;
     // Make sure the flag is set to 0 to indicate there is space in the buffer
-    UDP_RX_FIFO_Buffer[UDP_RX_FIFO_DEPTH - 1].TX_FLAG = 0;
+    UDP_RX_FIFO_Buffer[UDP_RX_FIFO_DEPTH - 1].UDP_RX_FLAG = 0;
     // printf("LW_FIFO_Update: Updating position : %d to indicate free space!\n", LW_FIFO_DEPTH - 1 );
     // printf("LW_FIFO_Update: New FIFO Idx: %d\n", LW_TX_FIFO_Idx );
   }

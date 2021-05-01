@@ -22,6 +22,7 @@
 #include <stdint.h>           // Required for unint8 etc
 #include <wiringPi.h>         // Required for using wiringPi
 #include <wiringPiSPI.h>      // Required for using SPI
+#include <cstring>            // Required for memcpy
 #include "hal.h"              // The header file for this
 #include "base64.h"
 #include "udp.h"
@@ -49,11 +50,61 @@ int ssPin = 6;
 int dio0  = 7;
 
 // Message buffer
-char message[256];
+
 char b64[256];
 
 // Received number of bytes by RF
 byte receivedbytes;
+
+uint32_t cp_nb_rx_rcv;
+uint32_t cp_nb_rx_ok;
+uint32_t cp_nb_rx_bad;
+uint32_t cp_nb_rx_nocrc;
+uint32_t cp_up_pkt_fwd;
+
+/**
+* Lora TX_Buffer structure
+*/
+struct LORA_TX_BUFFER_STRUCT {
+ uint8_t   LORA_TX_FRAME[LORA_TX_MX_FRAME_SIZE];      /**< LORA TX Frame */
+ byte      LORA_TX_FRAME_SIZE;                       /**< Size of frame to transmit */
+ uint8_t   LORA_TX_FLAG;                             /**< TX_FLAG: 0 = No frame to send, 1 = Frame to send */
+ /// Maybe add other data, flags etc?
+};
+/**
+* LORA TX FIFO Buffer
+*/
+struct LORA_TX_BUFFER_STRUCT LORA_TX_FIFO_Buffer[LORA_TX_FIFO_DEPTH];
+/**
+* TXFifo index
+*/
+uint8_t LORA_TX_FIFO_Idx = 0;
+
+/**
+* UDP RX_Buffer structure
+*/
+struct LORA_RX_BUFFER_STRUCT {
+ uint8_t    LORA_RX_FRAME[LORA_RX_MX_FRAME_SIZE];      /**< RX Frame */
+ byte       LORA_RX_FRAME_SIZE;                       /**< Size of frame received */
+ uint8_t    LORA_RX_FLAG;                             /**< RX_FLAG: 0 = No frame received, 1 = Frame received */
+ byte       LORA_RX_RSSI;
+ byte       LORA_RX_PACKET_RSSI;
+ long       LORA_RX_SNR;
+ /// Maybe add other data, flags etc?
+};
+/**
+* UDP RX FIFO Buffer
+*/
+struct LORA_RX_BUFFER_STRUCT LORA_RX_FIFO_Buffer[LORA_RX_FIFO_DEPTH];
+/**
+* RX Fifo index
+*/
+uint8_t LORA_RX_FIFO_Idx = 0;
+
+
+
+
+
 
 /**
 * __Function__: HAL_Init
@@ -106,11 +157,14 @@ int HAL_Init( void )
 int HAL_Engine(void)
 {
   // Execute HAL tasks
-  // Checking for received RF Packets
-  HAL_ReceivePacket();
+  // Checking for received RF Packets and put them into the FIFO buffer, the GW layer to process the received messages
+  HAL_Process_RX();
 
   /// TODO: check TX to node, does it need to be in lockstep with node availability?
   /// Keep track of Node RX windows ?
+  // Check for TX message waiting in the TX Fifo and send them if required
+  HAL_Process_TX();
+
 
   return 0;
 }
@@ -305,6 +359,7 @@ int HAL_SetupLoRa( void )
  *
  * __Remarks__:
  */
+ // Change this to add to TX FIFO, send to be done by HAL_Process_TX
 int HAL_SendFrame( uint8_t *TxFrame, byte FrameSize )
 {
   /// Debug
@@ -335,6 +390,42 @@ int HAL_SendFrame( uint8_t *TxFrame, byte FrameSize )
 
   return 0;
 }
+
+
+/**
+* __Function__: HAL_Process_TX
+*
+* __Description__: Send a frame using the Lora radio if one is in the FIFO
+*
+* __Input__: void
+*
+* __Output__: void
+*
+* __Status__: Work in Progress
+*
+* __Remarks__: Check if there is a frame to send in the FIFO , if there is, use
+*/
+int HAL_Process_TX()
+{
+  // Check LORA TX fifo
+  if( LORA_TX_FIFO_Buffer[0].LORA_TX_FLAG != 0)
+  {
+    // Send the first message in the Fifo
+    printf("HAL_Process_TX: There is something to send!\n");    /// Debug
+    HAL_SendFrame( LORA_TX_FIFO_Buffer[0].LORA_TX_FRAME, LORA_TX_FIFO_Buffer[0].LORA_TX_FRAME_SIZE );
+
+    printf("HAL_Process_TX: TX Frame processed\n");   /// Debug
+    LORA_TX_FIFO_Buffer[0].LORA_TX_FLAG = 0;          // Set flag to 0 to indicate frame has been processed
+    HAL_TX_FIFO_Update();                           // Shift frames fown the FIFO if applicable
+    return 0;
+  }
+  else
+  {
+    // Nothing to process return
+    return 0;
+  }
+}
+
 
 
 
@@ -369,7 +460,7 @@ void HAL_packagesend()
 }
 
 /**
-* __Function__: HAL_ReceivePacket
+* __Function__: HAL_Process_RX
 *
 * __Description__: Check for packets receieved from the RF radio
 *
@@ -379,19 +470,21 @@ void HAL_packagesend()
 *
 * __Status__: Work in Progress
 *
-* __Remarks__:
+* __Remarks__: If packet received put in FIFO, Application layer to process received LORA packages
 */
-void HAL_ReceivePacket()
+int HAL_Process_RX()
 {
     long int SNR;
     int rssicorr;
+    char Lora_RX_Message[LORA_RX_MX_FRAME_SIZE];
 
     // Check DIO0 if there is a package received, if so process if not move on
     if(digitalRead(dio0) == 1)
     {
         // Message received, process
-        if(HAL_ReceivePkt(message)) {
-            byte value = HAL_readRegister(REG_PKT_SNR_VALUE);
+        if(HAL_ReceivePkt(Lora_RX_Message))
+        {
+            byte value = HAL_readRegister(REG_PKT_SNR_VALUE);     /// Check on what the SNR value is
             if( value & 0x80 ) // The SNR sign bit is 1
             {
                 // Invert and divide by 4
@@ -410,140 +503,27 @@ void HAL_ReceivePacket()
                 rssicorr = 157;
             }
 
-            ///Debug
-            printf("Packet RSSI: %d, ",HAL_readRegister(0x1A)-rssicorr);
-            printf("RSSI: %d, ",HAL_readRegister(0x1B)-rssicorr);
-            printf("SNR: %li, ",SNR);
-            printf("Length: %i",(int)receivedbytes);
-            printf("\n");
+            ///Debug, remove when done
+            printf("HAL_Process_RX: Packet RSSI: %d, \n",HAL_readRegister(0x1A)-rssicorr);
+            printf("HAL_Process_RX: RSSI: %d, \n",HAL_readRegister(0x1B)-rssicorr);
+            printf("HAL_Process_RX: SNR: %li, \n",SNR);
+            printf("HAL_Process_RX: Length: %i \n",(int)receivedbytes);
 
-            int j;
-            j = bin_to_b64((uint8_t *)message, receivedbytes, (char *)(b64), 341);
-
-           //  Bytes  | Function
-           // :------:|---------------------------------------------------------------------
-           //  0      | protocol version = 2
-           //  1-2    | random token
-           //  3      | PUSH_DATA identifier 0x00
-           //  4-11   | Gateway unique identifier (MAC address)
-           //  12-end | JSON object, starting with {, ending with }, see section 4
-
-            char buff_up[TX_BUFF_SIZE]; /* buffer to compose the upstream packet */
-            int buff_index=0;
-
-            /* gateway <-> MAC protocol variables */
-            //static uint32_t net_mac_h; /* Most Significant Nibble, network order */
-            //static uint32_t net_mac_l; /* Least Significant Nibble, network order */
-
-            /* pre-fill the data buffer with fixed fields */
-            buff_up[0] = UDP_GetProtoVersion();
-            buff_up[3] = PKT_PUSH_DATA;
-
-            /* process some of the configuration variables */
-            //net_mac_h = htonl((uint32_t)(0xFFFFFFFF & (lgwm>>32)));
-            //net_mac_l = htonl((uint32_t)(0xFFFFFFFF &  lgwm  ));
-            //*(uint32_t *)(buff_up + 4) = net_mac_h;
-            //*(uint32_t *)(buff_up + 8) = net_mac_l;
-
-            buff_up[4] = (unsigned char)ifr.ifr_hwaddr.sa_data[0];
-            buff_up[5] = (unsigned char)ifr.ifr_hwaddr.sa_data[1];
-            buff_up[6] = (unsigned char)ifr.ifr_hwaddr.sa_data[2];
-            buff_up[7] = 0xFF;
-            buff_up[8] = 0xFF;
-            buff_up[9] = (unsigned char)ifr.ifr_hwaddr.sa_data[3];
-            buff_up[10] = (unsigned char)ifr.ifr_hwaddr.sa_data[4];
-            buff_up[11] = (unsigned char)ifr.ifr_hwaddr.sa_data[5];
-
-            /* start composing datagram with the header */
-            uint8_t token_h = (uint8_t)rand(); /* random token */
-            uint8_t token_l = (uint8_t)rand(); /* random token */
-            buff_up[1] = token_h;
-            buff_up[2] = token_l;
-            buff_index = 12; /* 12-byte header */
-
-            // TODO: tmst can jump is time is (re)set, not good.
-            struct timeval now;
-            gettimeofday(&now, NULL);
-            uint32_t tmst = (uint32_t)(now.tv_sec*1000000 + now.tv_usec);
-
-            /* start of JSON structure */
-            memcpy((void *)(buff_up + buff_index), (void *)"{\"rxpk\":[", 9);
-            buff_index += 9;
-            buff_up[buff_index] = '{';
-            ++buff_index;
-            j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, "\"tmst\":%u", tmst);
-            buff_index += j;
-            j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"chan\":%1u,\"rfch\":%1u,\"freq\":%.6lf", 0, 0, (double)freq2/1000000);
-            buff_index += j;
-            memcpy((void *)(buff_up + buff_index), (void *)",\"stat\":1", 9);
-            buff_index += 9;
-            memcpy((void *)(buff_up + buff_index), (void *)",\"modu\":\"LORA\"", 14);
-            buff_index += 14;
-            /* Lora datarate & bandwidth, 16-19 useful chars */
-            switch (sf) {
-            case SF7:
-                memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF7", 12);
-                buff_index += 12;
-                break;
-            case SF8:
-                memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF8", 12);
-                buff_index += 12;
-                break;
-            case SF9:
-                memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF9", 12);
-                buff_index += 12;
-                break;
-            case SF10:
-                memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF10", 13);
-                buff_index += 13;
-                break;
-            case SF11:
-                memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF11", 13);
-                buff_index += 13;
-                break;
-            case SF12:
-                memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF12", 13);
-                buff_index += 13;
-                break;
-            default:
-                memcpy((void *)(buff_up + buff_index), (void *)",\"datr\":\"SF?", 12);
-                buff_index += 12;
-            }
-            memcpy((void *)(buff_up + buff_index), (void *)"BW125\"", 6);
-            buff_index += 6;
-            memcpy((void *)(buff_up + buff_index), (void *)",\"codr\":\"4/5\"", 13);
-            buff_index += 13;
-            j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"lsnr\":%li", SNR);
-            buff_index += j;
-            j = snprintf((char *)(buff_up + buff_index), TX_BUFF_SIZE-buff_index, ",\"rssi\":%d,\"size\":%u", HAL_readRegister(0x1A)-rssicorr, receivedbytes);
-            buff_index += j;
-            memcpy((void *)(buff_up + buff_index), (void *)",\"data\":\"", 9);
-            buff_index += 9;
-            j = bin_to_b64((uint8_t *)message, receivedbytes, (char *)(buff_up + buff_index), 341);
-            buff_index += j;
-            buff_up[buff_index] = '"';
-            ++buff_index;
-
-            /* End of packet serialization */
-            buff_up[buff_index] = '}';
-            ++buff_index;
-            buff_up[buff_index] = ']';
-            ++buff_index;
-            /* end of JSON datagram payload */
-            buff_up[buff_index] = '}';
-            ++buff_index;
-            buff_up[buff_index] = 0; /* add string terminator, for safety */
-
-            printf("rxpk update: %s\n", (char *)(buff_up + 12)); /* DEBUG: display JSON payload */
-
-            //send the messages
-            sendudp(buff_up, buff_index);
-
-            fflush(stdout);
-
-        } // received a message
-
+            // message contains package, length in receivedbytes
+            // Add to LORA FIFO buffer
+            memcpy(LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_FRAME, Lora_RX_Message, receivedbytes);
+            // set send flag
+            LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_FLAG = 1;                                       // Set flag to one to indicate there is a frame to be send
+            LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_FRAME_SIZE = receivedbytes;                     // Add frame size
+            LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_PACKET_RSSI = HAL_readRegister(0x1A)-rssicorr;  // Store Packet RSSI
+            LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_RSSI = HAL_readRegister(0x1B)-rssicorr;         // Store RSSI
+            LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_SNR = SNR;
+            printf("HAL_Process_RX: Lora Frame received and added to buffer at position: %d\n", LORA_RX_FIFO_Idx );
+            //Increase the fifo index
+            LORA_RX_FIFO_Idx++;
+        }
     } // dio0=1
+    return 0;
 }
 
 
@@ -560,7 +540,7 @@ void HAL_ReceivePacket()
 *
 * __Remarks__:
 */
-boolean HAL_ReceivePkt(char *payload)
+bool HAL_ReceivePkt(char *payload)
 {
 
     // clear rxDone
@@ -654,4 +634,176 @@ int HAL_GetSF( void )
 uint32_t HAL_GetFreq( void )
 {
   return freq;
+}
+
+
+
+
+
+
+/**
+* __Function__: HAL_ReceiveFrame
+*
+* __Description__: Function to be called from application layer to get received package out of FIFO if available
+*
+* __Input__: Pointer to buffer where frame can be stored
+*
+* __Output__: Error code: -1 = No Package available else Number of bytes received
+*
+* __Status__: Work in Progress
+*
+* __Remarks__:
+*/
+int HAL_ReceiveFrame(uint8_t *RxFrame)
+{
+  // Check for message in FIFO, if not available return -1
+  if( LORA_RX_FIFO_Buffer[0].LORA_RX_FLAG != 0)
+  {
+    // Copy the frame from the FIFO in the application buffer
+    memcpy( RxFrame, LORA_RX_FIFO_Buffer[0].LORA_RX_FRAME, LORA_RX_FIFO_Buffer[0].LORA_RX_FRAME_SIZE);
+    LORA_RX_FIFO_Buffer[0].LORA_RX_FLAG = 0;                    // Set flag to 0 to indicate frame has been processed
+    HAL_RX_FIFO_Update();                                      // Move received frames down the UDP RX FIFO
+    /// Not returning the other information stores such as RSSI, might need this in the future
+    printf("HAL_ReceiveFrame: RX Frame processed\n");           /// Debug
+    return LORA_RX_FIFO_Buffer[0].LORA_RX_FRAME_SIZE;           // Return number of bytes received
+  }
+  else
+  {
+    // Nothing in the LORA RX FIFO
+    return -1;
+  }
+}
+
+
+/**
+* __Function__: HAL_TransmitFrame
+*
+* __Description__: Function to be called by application layer to send frames using Lora
+*
+* __Input__: void
+*
+* __Output__: uint32_t Frequency
+*
+* __Status__: Work in Progress
+*
+* __Remarks__:
+*/
+int HAL_TransmitFrame(uint8_t *TxFrame,int FrameSize)
+{
+  /// __Incode Comments:__
+  // check for space in HAL TX FIFO
+  // Buffer Index runs from 0 to HAL_FIFO_DEPTH - 1
+  if(LORA_TX_FIFO_Idx < (LORA_TX_FIFO_DEPTH))
+  {
+    if(FrameSize <= LORA_TX_MX_FRAME_SIZE)
+    {
+      // Copy frame in buffer
+      memcpy(LORA_TX_FIFO_Buffer[LORA_TX_FIFO_Idx].LORA_TX_FRAME, TxFrame, FrameSize);
+      // set send flag
+      LORA_TX_FIFO_Buffer[LORA_TX_FIFO_Idx].LORA_TX_FLAG = 1;                 // Set flag to one to indicate there is a frame to be send
+      LORA_TX_FIFO_Buffer[LORA_TX_FIFO_Idx].LORA_TX_FRAME_SIZE = FrameSize;   // Add frame size
+      //printf("LW_AddFrameToTXBuffer: Frame added to buffer at position: %d\n", HAL_TX_FIFO_Idx );
+      //Increase the fifo index
+      LORA_TX_FIFO_Idx++;
+      // No error, return
+      /// The sending of the frame from the HAL TX Fifo is handled in HAL_Engine (HAL_Process_TX)
+      return 0;
+    }
+    else
+    {
+      printf("HAL_TransmitFrame: FrameSize to big, frame cannot be send!\n");
+      return 2;   /// Error 2: FrameSize to big
+    }
+
+  }
+  else
+  {
+    // Buffer full
+    printf("HAL_TransmitFrame: Buffer full, frame cannot be send!\n");
+    return 1;       /// Error 1: TX Buffer full
+  }
+}
+
+/**
+ * __Function__: LORA_RX_FIFO_Update
+ *
+ * __Description__: Move frames down the fifo
+ *
+ * __Input__: Void
+ *
+ * __Output__: void
+ *
+ * __Status__: Completed
+ *
+ * __Remarks__: none
+ */
+static void HAL_RX_FIFO_Update( void )
+{
+  int i;
+
+  // printf("LW_FIFO_Update: index : %d \n", LW_TX_FIFO_Idx);
+
+  if(LORA_RX_FIFO_Idx)
+  {
+    // update FIFO if Required
+    for(i=0; i < (LORA_RX_FIFO_DEPTH - 1); ++i)
+    {
+      // Move frames down
+      LORA_RX_FIFO_Buffer[i] = LORA_RX_FIFO_Buffer[i+1];
+      // printf("LW_FIFO_Update: Move queue position : %d to : %d \n", i+1, i);
+    }
+    //Decrease the fifo index
+    LORA_RX_FIFO_Idx--;
+    // Make sure the flag is set to 0 to indicate there is space in the buffer
+    LORA_RX_FIFO_Buffer[LORA_RX_FIFO_DEPTH - 1].LORA_RX_FLAG = 0;
+    // printf("LW_FIFO_Update: Updating position : %d to indicate free space!\n", LW_FIFO_DEPTH - 1 );
+    // printf("LW_FIFO_Update: New FIFO Idx: %d\n", LW_TX_FIFO_Idx );
+  }
+  else
+  {
+    // Nothing to do, IDX at 0
+    // printf("LW_FIFO_Update: Nothing to do, idx at : 0\n");
+  }
+}
+
+/**
+ * __Function__: LORA_TX_FIFO_Update
+ *
+ * __Description__: Move frames down the fifo
+ *
+ * __Input__: Void
+ *
+ * __Output__: void
+ *
+ * __Status__: Completed
+ *
+ * __Remarks__: none
+ */
+static void HAL_TX_FIFO_Update( void )
+{
+  int i;
+
+  // printf("LW_FIFO_Update: index : %d \n", LW_TX_FIFO_Idx);
+
+  if(LORA_TX_FIFO_Idx)
+  {
+    // update FIFO if Required
+    for(i=0; i < (LORA_TX_FIFO_DEPTH - 1); ++i)
+    {
+      // Move frames down
+      LORA_TX_FIFO_Buffer[i] = LORA_TX_FIFO_Buffer[i+1];
+      // printf("LW_FIFO_Update: Move queue position : %d to : %d \n", i+1, i);
+    }
+    //Decrease the fifo index
+    LORA_TX_FIFO_Idx--;
+    // Make sure the flag is set to 0 to indicate there is space in the buffer
+    LORA_TX_FIFO_Buffer[LORA_TX_FIFO_DEPTH - 1].LORA_TX_FLAG = 0;
+    // printf("LW_FIFO_Update: Updating position : %d to indicate free space!\n", LW_FIFO_DEPTH - 1 );
+    // printf("LW_FIFO_Update: New FIFO Idx: %d\n", LW_TX_FIFO_Idx );
+  }
+  else
+  {
+    // Nothing to do, IDX at 0
+    // printf("LW_FIFO_Update: Nothing to do, idx at : 0\n");
+  }
 }
