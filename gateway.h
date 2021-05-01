@@ -60,5 +60,10 @@ enum {
 #define PULL_DATA_PKT_LEN   12
 
 
+// Set location and altitude
+float lat=0;
+float lon=0;
+int   alt=0;
+
 
 #endif // _gateway_h_

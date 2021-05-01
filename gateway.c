@@ -42,6 +42,17 @@ uint32_t cp_up_pkt_fwd;
 // variable to store mac address of gateway
 struct ifreq GW_ifr;
 
+// Informal status fields
+static char platform[24]    = "Single Channel Gateway";  /* platform definition */
+static char email[40]       = "";                        /* used for contact email */
+static char description[64] = "";                        /* used for free form description */
+
+byte receivedbytes;
+
+byte currentMode = 0x81;   /// check if this is used
+
+char message[256];
+char b64[256];
 
 /**
 * __Function__: GW_Init
@@ -82,6 +93,12 @@ int GW_Init(void)
     (unsigned char)GW_ifr.ifr_hwaddr.sa_data[4],
     (unsigned char)GW_ifr.ifr_hwaddr.sa_data[5]);
   printf("--------------------------------------------------------\n");
+
+  // Send status update to the server
+  GW_SendStat();
+  // Send pull data request to server
+  GW_SendPullData();
+  // No errors
   return 0;
 }
 
@@ -106,7 +123,7 @@ int GW_Engine(void)
 
 
  // Check on UDP Packet received, if yes process and forward to LoRa
-
+ GW_ProcessRX_UDP();
 
  // Send status updated to server
  GW_SendGWStatusUpate();
@@ -191,7 +208,7 @@ int GW_SendPullDataTMR(void)
 *
 * __Status__: Work in Progress
 *
-* __Remarks__:
+* __Remarks__: Send a status up date to the server
 */
 void GW_SendStat() {
 
@@ -231,8 +248,12 @@ void GW_SendStat() {
 
     printf("stat update: %s\n", (char *)(status_report+12)); /* DEBUG: display JSON stat */
 
-    //send the update
-    UDP_SendUDP(status_report, stat_index);
+    //send the Gateway status updates to the server
+    if(UDP_SendUDP(status_report, stat_index))
+    {
+      // if not 0 = error
+      printf("GW_SendStat: Error sending UDP!");
+    }
 }
 
 /**
@@ -255,7 +276,7 @@ void GW_SendStat() {
 *  3      | PULL_DATA identifier 0x02
 *  4-11   | Gateway unique identifier (MAC address)
 */
-int GW_SendPullPata()
+int GW_SendPullData()
 {
   char buff_up[PULL_DATA_PKT_LEN]; /* buffer to compose the upstream packet */
   int buff_index=PULL_DATA_PKT_LEN;
@@ -292,10 +313,142 @@ int GW_SendPullPata()
   //        (unsigned char)ifr.ifr_hwaddr.sa_data[4],
   //        (unsigned char)ifr.ifr_hwaddr.sa_data[5]);
 
-  // Send package
-  UDP_SendUDP(buff_up, buff_index);
+  // Send Pull data requests to the server
+  if( UDP_SendUDP(buff_up, buff_index))
+  {
+    // Error if not 0
+    printf("GW_SendPullData: Error sending UDP!\n");
+  }
 
   fflush(stdout);
 
   return 0;
+}
+
+/**
+* __Function__: GW_ProcessRX_UDP
+*
+* __Description__: Gateway check UDP packages received and process
+*
+* __Input__: void
+*
+* __Output__: Error code: 0 = no error, -1 = Socket error
+*
+* __Status__: Work in Progress
+*
+* __Remarks__: Function to be called from gateway engine
+*/
+GW_ProcessRX_UDP()
+{
+  char buffer[MAXLINE];  // Receive buffer
+  char JsonPayload[MAXLINE];
+  unsigned char RF_Payload[MAXLINE];
+  char *RF_B64_Payload_Str;
+  unsigned int len = 0;
+  int RF_Len, ResultLen = 0;
+  int NumBytes = 0;
+
+  struct json_object *RF_B64_Payload;
+  struct json_object *RF_Pkt_Len;
+  struct json_object *RF_TX_Pkt;
+  struct json_object *PushPacket;
+
+  // Change this to get message from UDP FIFO RX Buffer
+  NumBytes = UDP_RetreiveRXfromFIFO((char *)buffer);
+
+  if(NumBytes != -1)
+  {
+    // Check what type of package is received, to do that, read the 4th byte, the identifier
+    switch (buffer[3])
+    {
+      case PKT_PUSH_ACK:
+        // Bytes   | Function
+        // :------:|---------------------------------------------------------------------
+        // 0       | protocol version = 2
+        // 1-2     | same token as the PUSH_DATA packet to acknowledge
+        // 3       | PUSH_ACK identifier 0x01
+        printf("GW_ProcessRX_UDP: PUSH_ACK Received!\n");
+      break;
+
+      case PKT_PULL_RESP:
+        // Bytes   | Function
+        // :------:|---------------------------------------------------------------------
+        // 0       | protocol version = 2
+        // 1-2     | random token
+        // 3       | PULL_RESP identifier 0x03
+        // 4-end   | JSON object, starting with {, ending with }, see section 6
+        printf("GW_ProcessRX_UDP: PULL_RESP : Received!\n");
+        printf("GW_ProcessRX_UDP: PULL_RESP : Numbytes : %d \n", NumBytes);
+        // Packet needs to be transmitted so that the end device can pick it up, but first lets check the package
+        // Payload is received as a JSON:
+        // {
+        // 	"txpk": {...}
+        // }
+
+        // Copy JSON payload in a seperate buffer
+        memcpy((void *)JsonPayload, (void *)(buffer + 4 ), NumBytes - 4);
+
+        // Parse JSON package
+        PushPacket = json_tokener_parse( JsonPayload );
+
+        /// Debug
+        printf("GW_ProcessRX_UDP: jobj from str:\n---\n%s\n---\n", json_object_to_json_string_ext(PushPacket, JSON_C_TO_STRING_SPACED | JSON_C_TO_STRING_PRETTY));
+
+        // Decode payload (raw payload is b64 encoded)
+        // txpk.data | string | Base64 encoded RF packet payload, padding optional
+        // get raw data from json, ignore the rest for nowtime
+        // Get length of raw data: size | number | RF packet payload size in bytes (unsigned integer)
+        // First get top level JSON entry as the size and data are nested
+        json_object_object_get_ex(PushPacket, "txpk", &RF_TX_Pkt);
+        // Next get the size object
+        json_object_object_get_ex(RF_TX_Pkt, "size", &RF_Pkt_Len);
+
+        RF_Len = json_object_get_int(RF_Pkt_Len);
+        /// Debug
+        printf("GW_ProcessRX_UDP: RF Packet length : %d ", RF_Len);
+
+
+        // Next get the data object = string
+        json_object_object_get_ex(RF_TX_Pkt, "data", &RF_B64_Payload);
+
+        RF_B64_Payload_Str = (char *) json_object_get_string(RF_B64_Payload);
+
+        // Decode packet, use the length of the b64 sting as a length not the size recovered from the received packet!
+        if(( ResultLen = b64_to_bin(RF_B64_Payload_Str, strlen(RF_B64_Payload_Str), RF_Payload, MAXLINE)) > 1)
+         {
+           /// Debug
+           printf("GW_ProcessRX_UDP: B64 to bin length : %d \n", ResultLen );
+         }
+         else
+         {
+           printf("GW_ProcessRX_UDP: B64 error: %d\n", ResultLen);
+           break;
+         }
+         // Ok now we have the decoded package on RF_B64_Payload_Str and the size in RF_Len
+         // Only send when node is listening
+
+
+
+      break;
+
+      case PKT_PULL_ACK:
+        // Bytes   | Function
+        // :------:|---------------------------------------------------------------------
+        // 0       | protocol version = 2
+        // 1-2     | same token as the PULL_DATA packet to acknowledge
+        // 3       | PULL_ACK identifier 0x04
+        printf("GW_ProcessRX_UDP: PULL_ACK Received!\n");
+      break;
+
+      default:
+        printf("GW_ProcessRX_UDP: Unknown package received!\n");
+
+    }
+
+  }
+  else
+  {
+    //printf("Nothing received\n");
+  }
+
 }

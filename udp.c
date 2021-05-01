@@ -14,11 +14,13 @@
  *
  *******************************************************************************/
 
+/// TODO: Change init to accept server IP and port
+
 /**
 *
 * __Description__:
 *
-* UDP Procedures and functions source file, call UDP_init before the main Loop
+* UDP Procedures and functions source file, call UDP_Init before the main Loop
 * call UDP_Engine in the main loop of the programme to process any packages
 *
 */
@@ -33,11 +35,10 @@
 #include <cstdlib>
 #include <sys/time.h>
 #include <cstring>
-#include <json-c/json.h>     // required for json manipulation
-#include <cstring>           // Required form memcpy
+#include <cstring>            // Required for memcpy
 #include <sys/ioctl.h>
 #include <net/if.h>
-#include <fcntl.h> /* Added for the nonblocking socket */
+#include <fcntl.h>            // Added for the nonblocking socket
 #include "hal.h"
 #include "base64.h"
 #include "udp.h"
@@ -45,46 +46,47 @@
 typedef bool boolean;
 typedef unsigned char byte;
 
- // Set location and altitude
- float lat=0;
- float lon=0;
- int   alt=0;
+struct sockaddr_in ServerAddr;  // Struct var to store the Server address
+int ServerSocket;               // Server Socket
+int slen=sizeof(ServerAddr);    // Length of server address
+struct ifreq ifr;               // Struct far to store the MAC address of ETH0
 
- // Informal status fields
- static char platform[24]    = "Single Channel Gateway";  /* platform definition */
- static char email[40]       = "";                        /* used for contact email */
- static char description[64] = "";                        /* used for free form description */
+/**
+* UDP TX_Buffer structure
+*/
+struct UDP_TX_BUFFER_STRUCT {
+ uint8_t   UDP_TX_FRAME[UDP_TX_MX_FRAME_SIZE];      /**< TX Frame */
+ byte      UDP_TX_FRAME_SIZE;                       /**< Size of frame to transmit */
+ uint8_t   UDP_TX_FLAG;                             /**< TX_FLAG: 0 = No frame to send, 1 = Frame to send */
+ /// Maybe add other data, flags etc?
+};
+/**
+* UDP TX FIFO Buffer
+*/
+struct UDP_TX_BUFFER_STRUCT UDP_TX_FIFO_Buffer[UDP_TX_FIFO_DEPTH];
+/**
+* TXFifo index
+*/
+uint8_t UDP_TX_FIFO_Idx = 0;
 
- byte receivedbytes;
+/**
+* UDP RX_Buffer structure
+*/
+struct UDP_RX_BUFFER_STRUCT {
+ uint8_t   UDP_RX_FRAME[UDP_RX_MX_FRAME_SIZE];      /**< RX Frame */
+ byte      UDP_RX_FRAME_SIZE;                       /**< Size of frame received */
+ uint8_t   UDP_RX_FLAG;                             /**< RX_FLAG: 0 = No frame received, 1 = Frame received */
+ /// Maybe add other data, flags etc?
+};
+/**
+* UDP RX FIFO Buffer
+*/
+struct UDP_RX_BUFFER_STRUCT UDP_RX_FIFO_Buffer[UDP_RX_FIFO_DEPTH];
+/**
+* RX Fifo index
+*/
+uint8_t UDP_RX_FIFO_Idx = 0;
 
- byte currentMode = 0x81;   /// check if this is used
-
- struct sockaddr_in si_other;
- int s, slen=sizeof(si_other);
-
- char message[256];
- char b64[256];
-
-struct ifreq ifr;
-
- /**
- * __Function__: UDP_GetEth0Mac
- *
- * __Description__: Get the Ethernet 0 MAC address from the UDP layer
- *
- * __Input__: void
- *
- * __Output__: Error code: 0 = no error, -1 = Socket error
- *
- * __Status__: Work in Progress
- *
- * __Remarks__:
- */
-int UDP_GetEth0Mac( struct ifreq *eth0_ifr)
-{
-  eth0_ifr = ifr;
-  return 0;
-}
 
  /**
  * __Function__: UDP_Init
@@ -97,12 +99,18 @@ int UDP_GetEth0Mac( struct ifreq *eth0_ifr)
  *
  * __Status__: Work in Progress
  *
- * __Remarks__:
+ * __Remarks__: Sets up non-blocking socket with server x on port y
  */
-int UDP_init( void )
+int UDP_Init( void )
 {
+  // Init vars
+  // Make sure the TX fifo pointer points to the first entry in the fifo
+  LW_TX_FIFO_Idx = 0;
+  // Make sure the RX fifo pointer points to the first entry in the fifo
+  LW_RX_FIFO_Idx = 0;
+
   // Open Socket
-  if ( (s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+  if (( ServerSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
   {
     printf("UDP_init: Error creating a socket!\n");
     return -1;     /// Error code: -1 = socket error
@@ -110,18 +118,20 @@ int UDP_init( void )
   // Change the socket into non-blocking state
   fcntl(s, F_SETFL, O_NONBLOCK);
 
-  memset((char *) &si_other, 0, sizeof(si_other));
-  si_other.sin_family = AF_INET;
-  si_other.sin_port = htons(PORT);
+  memset((char *) &ServerAddr, 0, sizeof(ServerAddr));
+  ServerAddr.sin_family = AF_INET;
+  ServerAddr.sin_port = htons(PORT);
 
+  // Load the server address in the structure var
+  inet_aton(SERVER , &ServerAddr.sin_addr);
+
+  // Get the mac address of ETH to be used as gateway address
   ifr.ifr_addr.sa_family = AF_INET;
   strncpy(ifr.ifr_name, "eth0", IFNAMSIZ-1);  // can we rely on eth0?
   ioctl(s, SIOCGIFHWADDR, &ifr);
 
   return 0;
 }
-
-
 
 /**
 * __Function__: UDP_Engine
@@ -139,195 +149,296 @@ int UDP_init( void )
 int UDP_Engine(void)
 {
 
-  // Check if any UDP packets are received
-  UDP_Receive();
+  // Check if any UDP packets are received and put them in the UDP RX FIFO
+  UDP_CheckRX();
 
-  // UDP Send ??....probably not required as we can send at any time to the server, we do not have to wait
+  // UDP Send messages put in to the UDP TX FIFO if Any
+  UDP_CheckTX();
 
   return 0;
 }
-
 
 /**
 * __Function__: UDP_SendUDP
 *
 * __Description__: Send a UDP Message
 *
-* __Input__: void
+* __Input__: char *msg, pointer to the message to be transmitted, length of packages
 *
-* __Output__: Error code: 0 = no error, 1 =
-*
-* __Status__: Work in Progress
-*
-* __Remarks__:
-*/
-int UDP_SendUDP(char *msg, int length)
-{
-
-  //Convert Server address to struct
-  inet_aton(SERVER , &si_other.sin_addr);
-  //Send UDP Package
-  if (sendto(s, (char *)msg, length, 0 , (struct sockaddr *) &si_other, slen)==-1)
-  {
-      return -1;
-  }
-  return 0;
-}
-
-
-/**
-* __Function__: UDP_Receive
-*
-* __Description__: Check if any UDP packets have been received, if so process
-*
-* __Input__: void
-*
-* __Output__: Error code: 0 = no error, 1 =
+* __Output__: Error code: 0 = no error, 1 = UDP TX Buffer Full, 2 = FRame to big
 *
 * __Status__: Work in Progress
 *
-* __Remarks__: Procedure is called by UDP_Engine
+* __Remarks__: Procedure to be called from application, add a frame to the TX Buffer
 */
-void UDP_Receive( void )
+int UDP_SendUDP(char *TxFrame, int FrameSize)
 {
-  char buffer[MAXLINE];  // Receive buffer
-  char JsonPayload[MAXLINE];
-  unsigned char RF_Payload[MAXLINE];
+  /// __Incode Comments:__
 
-  char *RF_B64_Payload_Str;
-
-  unsigned int len = 0;
-  int RF_Len, ResultLen = 0;
-
-  struct json_object *RF_B64_Payload;
-  struct json_object *RF_Pkt_Len;
-  struct json_object *RF_TX_Pkt;
-
-  int NumBytes = 0;
-
-  struct sockaddr_in cliaddr;
-
-  struct json_object *PushPacket;
-
-
-  len = sizeof(cliaddr);  //len is value/result
-
-
-
-  inet_aton(SERVER , &cliaddr.sin_addr);
-
-  NumBytes = recvfrom(s, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
-
-  if(NumBytes != -1)
+  // check for space in UDP TX FIFO
+  // Buffer Index runs from 0 to UDP_FIFO_DEPTH - 1
+  if(UDP_TX_FIFO_Idx < (UDP_FIFO_DEPTH))
   {
-    // Check what type of package is received, to do that, read the 4th byte, the identifier
-    switch (buffer[3])
+    if(FrameSize <= UDP_MX_FRAME_SIZE)
     {
-      case PKT_PUSH_ACK:
-        // Bytes   | Function
-        // :------:|---------------------------------------------------------------------
-        // 0       | protocol version = 2
-        // 1-2     | same token as the PUSH_DATA packet to acknowledge
-        // 3       | PUSH_ACK identifier 0x01
-        printf("UDP_Receive: PUSH_ACK Received!\n");
-      break;
-
-      case PKT_PULL_RESP:
-        // Bytes   | Function
-        // :------:|---------------------------------------------------------------------
-        // 0       | protocol version = 2
-        // 1-2     | random token
-        // 3       | PULL_RESP identifier 0x03
-        // 4-end   | JSON object, starting with {, ending with }, see section 6
-        printf("UDP_Receive: PULL_RESP : Received!\n");
-        printf("UDP_Receive: PULL_RESP : Numbytes : %d \n", NumBytes);
-        // Packet needs to be transmitted so that the end device can pick it up, but first lets check the package
-        // Payload is received as a JSON:
-        // {
-        // 	"txpk": {...}
-        // }
-
-        // Copy JSON payload in a seperate buffer
-        memcpy((void *)JsonPayload, (void *)(buffer + 4 ), NumBytes - 4);
-
-        // Parse JSON package
-        PushPacket = json_tokener_parse( JsonPayload );
-
-        /// Debug
-        printf("UDP_Receive: jobj from str:\n---\n%s\n---\n", json_object_to_json_string_ext(PushPacket, JSON_C_TO_STRING_SPACED | JSON_C_TO_STRING_PRETTY));
-
-        // Decode payload (raw payload is b64 encoded)
-        // txpk.data | string | Base64 encoded RF packet payload, padding optional
-        // get raw data from json, ignore the rest for nowtime
-        // Get length of raw data: size | number | RF packet payload size in bytes (unsigned integer)
-        // First get top level JSON entry as the size and data are nested
-        json_object_object_get_ex(PushPacket, "txpk", &RF_TX_Pkt);
-        // Next get the size object
-        json_object_object_get_ex(RF_TX_Pkt, "size", &RF_Pkt_Len);
-
-        RF_Len = json_object_get_int(RF_Pkt_Len);
-        /// Debug
-        printf("UDP_Receive: RF Packet length : %d ", RF_Len);
-
-
-        // Next get the data object = string
-        json_object_object_get_ex(RF_TX_Pkt, "data", &RF_B64_Payload);
-
-        RF_B64_Payload_Str = (char *) json_object_get_string(RF_B64_Payload);
-
-        // Decode packet, use the length of the b64 sting as a length not the size recovered from the received packet!
-        if(( ResultLen = b64_to_bin(RF_B64_Payload_Str, strlen(RF_B64_Payload_Str), RF_Payload, MAXLINE)) > 1)
-         {
-           /// Debug
-           printf("UDP_Receive: B64 to bin length : %d \n", ResultLen );
-         }
-         else
-         {
-           printf("UDP_Receive: B64 error: %d\n", ResultLen);
-           break;
-         }
-         // Ok now we have the decoded package on RF_B64_Payload_Str and the size in RF_Len
-         // Only send when node is listening
-
-
-
-      break;
-
-      case PKT_PULL_ACK:
-        // Bytes   | Function
-        // :------:|---------------------------------------------------------------------
-        // 0       | protocol version = 2
-        // 1-2     | same token as the PULL_DATA packet to acknowledge
-        // 3       | PULL_ACK identifier 0x04
-        printf("UDP_Receive: PULL_ACK Received!\n");
-      break;
-
-      default:
-        printf("UDP_Receive: Unknown package received!\n");
-
+      // Copy frame in buffer
+      memcpy(UDP_TX_FIFO_Buffer[UDP_TX_FIFO_Idx].UDP_TX_FRAME, TxFrame, FrameSize);
+      // set send flag
+      UDP_TX_FIFO_Buffer[UDP_TX_FIFO_Idx].UDP_TX_FLAG = 1;                 // Set flag to one to indicate there is a frame to be send
+      UDP_TX_FIFO_Buffer[UDP_TX_FIFO_Idx].UDP_TX_FRAME_SIZE = FrameSize;   // Add frame size
+      //printf("LW_AddFrameToTXBuffer: Frame added to buffer at position: %d\n", LW_TX_FIFO_Idx );
+      //Increase the fifo index
+      LW_TX_FIFO_Idx++;
+      // No error, return
+      /// The sending of the frame from the UDP TX Fifo is handled in UDP_Engine (UDP_Transmit)
+      return 0;
+    }
+    else
+    {
+      printf("UDP_SendUDP: FrameSize to big, frame cannot be send!\n");
+      return 2;   /// Error 2: FrameSize to big
     }
 
   }
   else
   {
-    //printf("Nothing received\n");
+    // Buffer full
+    printf("UDP_SendUDP: Buffer full, frame cannot be send!\n");
+    return 1;       /// Error 1: TX Buffer full
   }
-
-
 }
 
-
-
-
-
-
-
-
-
-
-
-
-char UDP_GetProtoVersion( void )
+/**
+* __Function__: UDP_ReceiveUDP
+*
+* __Description__: Check if any UDP packets have been received and are in the FIFO buffer
+*
+* __Input__: char *buffer = pointer to a buffer
+*
+* __Output__: Number of bytes or nothing in FIFO = -1
+*
+* __Status__: Work in Progress
+*
+* __Remarks__: Procedure is called by the application
+*/
+int UDP_ReceiveUDP( char *RxBuffer )
 {
-  return PROTOCOL_VERSION;
+  // Check for message in FIFO, if not available return -1
+  if( UDP_RX_FIFO_Buffer[0].UDP_RX_FLAG != 0)
+  {
+    // Copy the frame from the FIFO in the application buffer
+    memcpy( RxBuffer, UDP_RX_FIFO_Buffer[0].UDP_RX_FRAME, UDP_RX_FIFO_Buffer[0].UDP_RX_FRAME_SIZE);
+    UDP_RX_FIFO_Buffer[0].UDP_RX_FLAG = 0;                  // Set flag to 0 to indicate frame has been processed
+    UDP_RX_FIFO_Update();                                   // Move received frames down the UDP RX FIFO
+
+    printf("UDP_ReceiveUDP: RX Frame processed\n");         /// Debug
+    return UDP_RX_FIFO_Buffer[0].UDP_RX_FRAME_SIZE;         // Return number of bytes received
+  }
+  else
+  {
+    // Nothing in the UDP RX FIFO
+    return -1;
+  }
+}
+
+/**
+* __Function__: UDP_GetEth0Mac
+*
+* __Description__: Get the Ethernet 0 MAC address from the UDP layer
+*
+* __Input__: void
+*
+* __Output__: Error code: 0 = no error, -1 = Socket error
+*
+* __Status__: Work in Progress
+*
+* __Remarks__:
+*/
+int UDP_GetEth0Mac( struct ifreq *eth0_ifr)
+{
+ eth0_ifr = ifr;
+ return 0;
+}
+
+/**
+* __Function__: UDP_Transmit
+*
+* __Description__: Send a UDP Message
+*
+* __Input__: void
+*
+* __Output__: Error code: 0 = no error, -1 = unable to send UDP frame
+*
+* __Status__: Work in Progress
+*
+* __Remarks__: Procedure to be called from UDP engine, sending TX frames from the UDP TX FIFO
+*/
+static int UDP_CheckTX( void )
+{
+  // Check UDP TX fifo
+  if( UDP_TX_FIFO_Buffer[0].UDP_TX_FLAG != 0)
+  {
+    // Send the first message in the Fifo
+    printf("UDP_Transmit: There is something to send!\n");    /// Debug
+
+    // Send the frame
+    if( sendto(ServerSocket, UDP_TX_FIFO_Buffer[0].UDP_TX_FRAME, UDP_TX_FIFO_Buffer[0].UDP_TX_FRAME_SIZE, 0 , (struct sockaddr *) &ServerAddr, slen) == -1 )
+    {
+      // error
+      printf("UDP_Transmit: Send frame error!\n");
+      return -1;
+    }
+    else
+    {
+      //Move frames down the Fifo
+      printf("UDP_Transmit: TX Frame processed\n");   /// Debug
+      UDP_TX_FIFO_Buffer[0].UDP_TX_FLAG = 0;          // Set flag to 0 to indicate frame has been processed
+      UDP_TX_FIFO_Update();                           // Shift frames fown the FIFO if applicable
+    }
+  }
+  else
+  {
+    // Nothing to send skip
+    //printf("UDP_Transmit: Nothing to send!\n");      /// Debug
+  }
+  return 0;
+}
+
+/**
+* __Function__: UDP_CheckRX
+*
+* __Description__: Check if any UDP packets have been received, if so add to UDP FIFO
+*
+* __Input__: void
+*
+* __Output__: Error code: 0 = nothing received, -1 = FIF full, Error code > 0 = number of bytes
+*
+* __Status__: Work in Progress
+*
+* __Remarks__: Procedure is called by UDP_Engine to get UDP frames and stores them in the UDP RX FIFO
+*/
+static int UDP_CheckRX( void )
+{
+  int NumRXBytes = 0;                   // Number of Bytes received
+  char RxBuffer[MAXLINE];               // Receive buffer
+  unsigned int AddressLength = 0;       // Address length of server sending packet
+  struct sockaddr_in SenderAddr;        // struct to store the sender (in this case the server) address in
+
+
+  if(UDP_RX_FIFO_Idx < UDP_RX_FIFO_DEPTH)
+  {
+    // There is space in the UDP RX FIFO so lets get a package
+    NumRXBytes = recvfrom(ServerSocket, (char *)RxBuffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &SenderAddr, &AddressLength));
+
+    /// Do I need to double check the package received is from the server to avoid spoofing ?
+
+    if(NumRXBytes != -1)
+    {
+      // Add to UDP FIFO buffer
+      memcpy(UDP_RX_FIFO_Buffer[UDP_RX_FIFO_Idx].UDP_RX_FRAME, RxBuffer, NumRXBytes);
+      // set send flag
+      UDP_RX_FIFO_Buffer[UDP_RX_FIFO_Idx].UDP_RX_FLAG = 1;                   // Set flag to one to indicate there is a frame to be send
+      UDP_RX_FIFO_Buffer[UDP_RX_FIFO_Idx].UDP_RX_FRAME_SIZE = NumRXBytes;   // Add frame size
+      printf("UDP_Receive: Frame received and added to buffer at position: %d\n", UDP_RX_FIFO_Idx );
+      //Increase the fifo index
+      UDP_RX_FIFO_Idx++;
+      return NumRXBytes;
+    }
+    else
+    {
+      //nothing received
+      return 0;
+
+    }
+  }
+  else
+  {
+    // Error, RX FIFO is Full
+    printf("UDP_Receive: Error, RX FIFO full, check processing of incoming packets!\n");
+    return -1;      /// error -1 : RX FIFO full
+  }
+}
+
+/**
+ * __Function__: UDP_TX_FIFO_Update
+ *
+ * __Description__: Move frames down the fifo
+ *
+ * __Input__: Void
+ *
+ * __Output__: void
+ *
+ * __Status__: Completed
+ *
+ * __Remarks__: none
+ */
+static void UDP_TX_FIFO_Update( void )
+{
+  int i;
+
+  // printf("LW_FIFO_Update: index : %d \n", LW_TX_FIFO_Idx);
+
+  if(UDP_TX_FIFO_Idx)
+  {
+    // update FIFO if Required
+    for(i=0; i < (UDP_TX_FIFO_DEPTH - 1); ++i)
+    {
+      // Move frames down
+      UDP_TX_FIFO_Buffer[i] = UDP_TX_FIFO_Buffer[i+1];
+      // printf("LW_FIFO_Update: Move queue position : %d to : %d \n", i+1, i);
+    }
+    //Decrease the fifo index
+    UDP_TX_FIFO_Idx--;
+    // Make sure the flag is set to 0 to indicate there is space in the buffer
+    UDP_TX_FIFO_Buffer[UDP_FIFO_DEPTH - 1].TX_FLAG = 0;
+    // printf("LW_FIFO_Update: Updating position : %d to indicate free space!\n", LW_FIFO_DEPTH - 1 );
+    // printf("LW_FIFO_Update: New FIFO Idx: %d\n", LW_TX_FIFO_Idx );
+  }
+  else
+  {
+    // Nothing to do, IDX at 0
+    // printf("LW_FIFO_Update: Nothing to do, idx at : 0\n");
+  }
+}
+
+/**
+ * __Function__: UDP_RX_FIFO_Update
+ *
+ * __Description__: Move frames down the fifo
+ *
+ * __Input__: Void
+ *
+ * __Output__: void
+ *
+ * __Status__: Completed
+ *
+ * __Remarks__: none
+ */
+static void UDP_RX_FIFO_Update( void )
+{
+  int i;
+
+  // printf("LW_FIFO_Update: index : %d \n", LW_TX_FIFO_Idx);
+
+  if(UDP_RX_FIFO_Idx)
+  {
+    // update FIFO if Required
+    for(i=0; i < (UDP_RX_FIFO_DEPTH - 1); ++i)
+    {
+      // Move frames down
+      UDP_RX_FIFO_Buffer[i] = UDP_RX_FIFO_Buffer[i+1];
+      // printf("LW_FIFO_Update: Move queue position : %d to : %d \n", i+1, i);
+    }
+    //Decrease the fifo index
+    UDP_RX_FIFO_Idx--;
+    // Make sure the flag is set to 0 to indicate there is space in the buffer
+    UDP_RX_FIFO_Buffer[UDP_RX_FIFO_DEPTH - 1].TX_FLAG = 0;
+    // printf("LW_FIFO_Update: Updating position : %d to indicate free space!\n", LW_FIFO_DEPTH - 1 );
+    // printf("LW_FIFO_Update: New FIFO Idx: %d\n", LW_TX_FIFO_Idx );
+  }
+  else
+  {
+    // Nothing to do, IDX at 0
+    // printf("LW_FIFO_Update: Nothing to do, idx at : 0\n");
+  }
 }
