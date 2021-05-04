@@ -369,7 +369,7 @@ void GW_ProcessRX_UDP(void)
         // 1-2     | random token
         // 3       | PULL_RESP identifier 0x03
         // 4-end   | JSON object, starting with {, ending with }, see section 6
-        printf("GW_ProcessRX_UDP: PULL_RESP : Received!\n");
+        printf("GW_ProcessRX_UDP: PULL_RESP : Received!!!!!\n");
         printf("GW_ProcessRX_UDP: PULL_RESP : Numbytes : %d \n", NumBytes);
         // Packet needs to be transmitted so that the end device can pick it up, but first lets check the package
         // Payload is received as a JSON:
@@ -397,7 +397,7 @@ void GW_ProcessRX_UDP(void)
 
         RF_Len = json_object_get_int(RF_Pkt_Len);
         /// Debug
-        printf("GW_ProcessRX_UDP: RF Packet length : %d ", RF_Len);
+        printf("GW_ProcessRX_UDP: RF Packet length : %d \n", RF_Len);
 
 
         // Next get the data object = string
@@ -418,6 +418,12 @@ void GW_ProcessRX_UDP(void)
          }
          // Ok now we have the decoded package on RF_B64_Payload_Str and the size in RF_Len
          // Only send when node is listening
+         printf("GW_ProcessRX_UDP: FRame handed of to Lora for transmit to node \n");
+         printf("GW_ProcessRX_UDP: MAC Header:");
+         OS_PrintBin( (byte)RF_Payload[0]);
+         printf("\n");
+
+         // Send out the frame using LORA
          HAL_TransmitFrame(RF_Payload, ResultLen);
 
       break;
@@ -475,8 +481,9 @@ int GW_ProcessRX_Lora()
   rssicorr = HAL_GetRssiCor();
 
   // Check if there is a Lora message in the Lora FIFO
-  if((RxNumBytes = HAL_ReceiveFrame(Lora_RX_Message)) != 1)
+  if((RxNumBytes = HAL_ReceiveFrame(Lora_RX_Message)) > 0)
   {
+    printf("GW_ProcessRX_Lora: Package received with: %d bytes \n", RxNumBytes);
     // Message received, convert to B64 message
     //BytesProcessed = bin_to_b64(Lora_RX_Message, RxNumBytes, (char *)(b64), 341);
 
@@ -567,7 +574,7 @@ int GW_ProcessRX_Lora()
     buff_index += j;
     memcpy((void *)(buff_up + buff_index), (void *)",\"data\":\"", 9);
     buff_index += 9;
-    j = bin_to_b64((uint8_t *)Lora_RX_Message, RxNumBytes, (char *)(buff_up + buff_index), 341);    /// Why 341, check it out
+    j = bin_to_b64((uint8_t *)Lora_RX_Message, RxNumBytes, (char *)(buff_up + buff_index), TX_BUFF_SIZE);    /// Why 341, check it out
     buff_index += j;
     buff_up[buff_index] = '"';
     ++buff_index;
@@ -590,7 +597,44 @@ int GW_ProcessRX_Lora()
       printf("GW_ProcessRX_Lora: Error sending UDP \n");
     }
 
+    printf("GW_ProcessRX_Lora: Package handed over to UDP with Length: %d \n", buff_index);
     fflush(stdout);       /// Why do we need this?
   } // No message in FIFO
   return 0;
+}
+
+/**
+ * __Function__: OS_PrintBin
+ *
+ * __Description__: Print the binary value of an integer
+ *
+ * __Input__: Integer to be printed in Binary
+ *
+ * __Output__: void
+ *
+ * __Status__: Complete
+ *
+ * __Remarks__: None
+ */
+void OS_PrintBin(byte x)
+{
+   /// __Incode Comments:__
+   int i;
+   printf("0b");
+   for(i=0; i<8; i++)
+   {
+      if((x & 0x80) !=0)
+      {
+         printf("1");
+      }
+      else
+      {
+         printf("0");
+      }
+      if (i==3)
+      {
+         printf(" ");
+      }
+      x = x<<1;
+   }
 }

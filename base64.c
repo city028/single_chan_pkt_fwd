@@ -105,17 +105,27 @@ int bin_to_b64_nopad(const uint8_t * in, int size, char * out, int max_len) {
 
 	/* check input values */
 	if ((out == NULL) || (in == NULL)) {
-		DEBUG("ERROR: NULL POINTER AS OUTPUT IN BIN_TO_B64\n");
+		printf("ERROR: NULL POINTER AS OUTPUT IN BIN_TO_B64\n");
 		return -1;
 	}
 	if (size == 0) {
+		printf("bin_to)b64_nopad: Error, size =0! \n");
 		*out = 0; /* null string */
-		return 0;
+		return -1;
+	}
+	if (size < 0) {
+		printf("bin_to_b64_nopad: Error, Size is negative! \n");
+		*out = 0; /* null string */
+		return -1;
 	}
 
+
 	/* calculate the number of base64 'blocks' */
+	printf("Bin_to_b64_nopad: Size: %d \n", size);
 	full_blocks = size / 3;
+	printf("Bin_to_b64_nopad: Full blocks: %d \n", full_blocks);
 	last_bytes = size % 3;
+	printf("Bin_to_b64_nopad: last bytes: %d \n", last_bytes);
 	switch (last_bytes) {
 		case 0: /* no byte left to encode */
 			last_chars = 0;

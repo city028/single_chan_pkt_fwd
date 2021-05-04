@@ -15,6 +15,8 @@ int GW_SendPullData(void);
 void GW_ProcessRX_UDP(void);
 int GW_ProcessRX_Lora(void);
 
+// Supporting functions
+void OS_PrintBin(byte x);
 
 
 // Join procedure constists of 2 frames the request and the accept frame
@@ -45,7 +47,7 @@ enum {
 
 
 
-#define TMR_TX_PULL       5     /// Send data pull request every 5 seconds
+#define TMR_TX_PULL       15     /// Send data pull request every 5 seconds
 #define TMR_STAT_TX       30    /// Send gateway status every 30 seconds
 
 #define PROTOCOL_VERSION  2      // Found a description of version 2 so that is what I will be using

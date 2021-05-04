@@ -185,6 +185,7 @@ int UDP_SendUDP(char *TxFrame, int FrameSize)
       UDP_TX_FIFO_Buffer[UDP_TX_FIFO_Idx].UDP_TX_FLAG = 1;                 // Set flag to one to indicate there is a frame to be send
       UDP_TX_FIFO_Buffer[UDP_TX_FIFO_Idx].UDP_TX_FRAME_SIZE = FrameSize;   // Add frame size
       //printf("LW_AddFrameToTXBuffer: Frame added to buffer at position: %d\n", LW_TX_FIFO_Idx );
+      printf("UDP_SendUDP: Frame with size: %d added to TX FIFO at position: %d \n", FrameSize, UDP_TX_FIFO_Idx);
       //Increase the fifo index
       UDP_TX_FIFO_Idx++;
       // No error, return
@@ -221,16 +222,19 @@ int UDP_SendUDP(char *TxFrame, int FrameSize)
 */
 int UDP_ReceiveUDP( char *RxBuffer )
 {
+  int BytesReceived;
+
   // Check for message in FIFO, if not available return -1
   if( UDP_RX_FIFO_Buffer[0].UDP_RX_FLAG != 0)
   {
     // Copy the frame from the FIFO in the application buffer
     memcpy( RxBuffer, UDP_RX_FIFO_Buffer[0].UDP_RX_FRAME, UDP_RX_FIFO_Buffer[0].UDP_RX_FRAME_SIZE);
     UDP_RX_FIFO_Buffer[0].UDP_RX_FLAG = 0;                  // Set flag to 0 to indicate frame has been processed
-    UDP_RX_FIFO_Update();                                   // Move received frames down the UDP RX FIFO
+    BytesReceived = UDP_RX_FIFO_Buffer[0].UDP_RX_FRAME_SIZE;
+    printf("UDP_ReceiveUDP: RX Frame processed with size : %d \n", BytesReceived);         /// Debug
 
-    printf("UDP_ReceiveUDP: RX Frame processed\n");         /// Debug
-    return UDP_RX_FIFO_Buffer[0].UDP_RX_FRAME_SIZE;         // Return number of bytes received
+    UDP_RX_FIFO_Update();                                   // Move received frames down the UDP RX FIFO
+    return BytesReceived;         // Return number of bytes received
   }
   else
   {
@@ -254,7 +258,13 @@ int UDP_ReceiveUDP( char *RxBuffer )
 */
 int UDP_GetEth0Mac( struct ifreq *eth0_ifr)
 {
- eth0_ifr = &ifr;
+  eth0_ifr->ifr_hwaddr.sa_data[0] = ifr.ifr_hwaddr.sa_data[0];
+  eth0_ifr->ifr_hwaddr.sa_data[1] = ifr.ifr_hwaddr.sa_data[1];
+  eth0_ifr->ifr_hwaddr.sa_data[2] = ifr.ifr_hwaddr.sa_data[2];
+  eth0_ifr->ifr_hwaddr.sa_data[3] = ifr.ifr_hwaddr.sa_data[3];
+  eth0_ifr->ifr_hwaddr.sa_data[4] = ifr.ifr_hwaddr.sa_data[4];
+  eth0_ifr->ifr_hwaddr.sa_data[5] = ifr.ifr_hwaddr.sa_data[5];
+
  return 0;
 }
 
@@ -337,7 +347,7 @@ int UDP_CheckRX( void )
       // set send flag
       UDP_RX_FIFO_Buffer[UDP_RX_FIFO_Idx].UDP_RX_FLAG = 1;                   // Set flag to one to indicate there is a frame to be send
       UDP_RX_FIFO_Buffer[UDP_RX_FIFO_Idx].UDP_RX_FRAME_SIZE = NumRXBytes;   // Add frame size
-      printf("UDP_Receive: Frame received and added to buffer at position: %d\n", UDP_RX_FIFO_Idx );
+      printf("UDP_Receive: Frame received with size: %d and added to buffer at position: %d\n", NumRXBytes, UDP_RX_FIFO_Idx );
       //Increase the fifo index
       UDP_RX_FIFO_Idx++;
       return NumRXBytes;

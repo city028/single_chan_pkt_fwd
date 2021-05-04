@@ -24,8 +24,6 @@
 #include <wiringPiSPI.h>      // Required for using SPI
 #include <cstring>            // Required for memcpy
 #include "hal.h"              // The header file for this
-#include "base64.h"
-#include "udp.h"
 
 /**
 *
@@ -81,7 +79,7 @@ struct LORA_TX_BUFFER_STRUCT LORA_TX_FIFO_Buffer[LORA_TX_FIFO_DEPTH];
 uint8_t LORA_TX_FIFO_Idx = 0;
 
 /**
-* UDP RX_Buffer structure
+* LORA RX_Buffer structure
 */
 struct LORA_RX_BUFFER_STRUCT {
  uint8_t    LORA_RX_FRAME[LORA_RX_MX_FRAME_SIZE];      /**< RX Frame */
@@ -93,7 +91,7 @@ struct LORA_RX_BUFFER_STRUCT {
  /// Maybe add other data, flags etc?
 };
 /**
-* UDP RX FIFO Buffer
+* LORA RX FIFO Buffer
 */
 struct LORA_RX_BUFFER_STRUCT LORA_RX_FIFO_Buffer[LORA_RX_FIFO_DEPTH];
 /**
@@ -457,6 +455,8 @@ void HAL_packagesend()
 
     // Change mode to standby, probably not required by going in listening mode
     HAL_writeRegister(REG_OPMODE, SX72_MODE_STANDBY);
+    // Go back to listening
+    HAL_writeRegister(REG_OPMODE, SX72_MODE_RX_CONTINUOS);
 	}
 }
 
@@ -577,7 +577,7 @@ bool HAL_ReceivePkt(char *payload)
 /**
 * __Function__: HAL_GetSF
 *
-* __Description__: In case outer layers, such as UDP need to understand the spreading factor the RF is using
+* __Description__: In case outer layers, such as LORA need to understand the spreading factor the RF is using
 *
 * __Input__: int -1 = Error else SF
 *
@@ -620,7 +620,7 @@ int HAL_GetSF( void )
 /**
 * __Function__: HAL_GetFreq
 *
-* __Description__: In case outer layers, such as UDP need to understand the frequency the RF is listening to
+* __Description__: In case outer layers, such as LORA need to understand the frequency the RF is listening to
 *
 * __Input__: void
 *
@@ -655,16 +655,18 @@ uint32_t HAL_GetFreq( void )
 */
 int HAL_ReceiveFrame(uint8_t *RxFrame)
 {
+  int BytesReceived;
   // Check for message in FIFO, if not available return -1
   if( LORA_RX_FIFO_Buffer[0].LORA_RX_FLAG != 0)
   {
     // Copy the frame from the FIFO in the application buffer
     memcpy( RxFrame, LORA_RX_FIFO_Buffer[0].LORA_RX_FRAME, LORA_RX_FIFO_Buffer[0].LORA_RX_FRAME_SIZE);
-    LORA_RX_FIFO_Buffer[0].LORA_RX_FLAG = 0;                    // Set flag to 0 to indicate frame has been processed
-    HAL_RX_FIFO_Update();                                      // Move received frames down the UDP RX FIFO
+    BytesReceived = LORA_RX_FIFO_Buffer[0].LORA_RX_FRAME_SIZE;
+    printf("HAL_ReceiveFrame: RX Frame processed with size: %d\n", LORA_RX_FIFO_Buffer[0].LORA_RX_FRAME_SIZE);           /// Debug
+        LORA_RX_FIFO_Buffer[0].LORA_RX_FLAG = 0;                    // Set flag to 0 to indicate frame has been processed
+    HAL_RX_FIFO_Update();                                           // Move received frames down the LORA RX FIFO
     /// Not returning the other information stores such as RSSI, might need this in the future
-    printf("HAL_ReceiveFrame: RX Frame processed\n");           /// Debug
-    return LORA_RX_FIFO_Buffer[0].LORA_RX_FRAME_SIZE;           // Return number of bytes received
+    return BytesReceived;                                           // Return number of bytes received
   }
   else
   {
