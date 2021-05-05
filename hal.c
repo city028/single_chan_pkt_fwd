@@ -24,7 +24,7 @@
 #include <wiringPiSPI.h>      // Required for using SPI
 #include <cstring>            // Required for memcpy
 #include "hal.h"              // The header file for this
-
+#include "os.h"
 /**
 *
 * User defined variables below!
@@ -44,7 +44,8 @@ int RST   = 0;
 bool sx1272 = true;
 
 // SX1272 - Raspberry connections
-int ssPin = 6;
+//int ssPin = 6;
+int ssPin = 24;
 int dio0  = 7;
 
 // Message buffer
@@ -364,6 +365,8 @@ int HAL_SendFrame( uint8_t *TxFrame, byte FrameSize )
   /// Debug
   printf("HAL_SendFrame: Sending frame, frame Size: %d\n", FrameSize);
   // OS_PrintFrame( TxFrame, FrameSize);
+  printf("Frame looks like this:\n");
+  OS_PrintFrame((uint8_t *)TxFrame, FrameSize);
 
   // clear TxDone IRQ
   HAL_writeRegister(REG_IRQ_FLAGS, 0x8);
@@ -381,11 +384,23 @@ int HAL_SendFrame( uint8_t *TxFrame, byte FrameSize )
   {
     HAL_writeRegister(REG_FIFO, TxFrame[i]);        /// double check size of FIFO buffer in SX
   }
-
   //Mode Request TX
   HAL_writeRegister(REG_OPMODE, SX72_MODE_TX);          /// need to check this, was expecting send to happen but does not seem the case, only when standby
-  // Go to standby mode
-  HAL_writeRegister(REG_OPMODE, SX72_MODE_STANDBY);     /// See above, not sure when TX only seems to happen when going to standby
+
+  // Get IRQ flags
+  int irqflags = HAL_readRegister(REG_IRQ_FLAGS);
+	//Check of TXDone flag is set
+	while(( irqflags & 0x8 ) != 0x8)
+	{
+    irqflags = HAL_readRegister(REG_IRQ_FLAGS);
+	}
+
+  printf("HAL_SendFrame : TxDone flag is set, reset flag\n");
+  // clear TxDone IRQ
+  HAL_writeRegister(REG_IRQ_FLAGS, 0x8);
+  // Go back to listening
+  printf("HAL_SendFrame : Go back to listening\n");
+  HAL_writeRegister(REG_OPMODE, SX72_MODE_RX_CONTINUOS);
 
   return 0;
 }
@@ -423,41 +438,6 @@ int HAL_Process_TX()
     // Nothing to process return
     return 0;
   }
-}
-
-
-
-
-/**
-* __Function__: HAL_packagesend
-*
-* __Description__: Send a frame using the Lora radio
-*
-* __Input__: void
-*
-* __Output__: void
-*
-* __Status__: Work in Progress
-*
-* __Remarks__:
-*/
-void HAL_packagesend()
-{
-	// Get IRQ flags
-  int irqflags = HAL_readRegister(REG_IRQ_FLAGS);
-	//Check of TXDone flag is set
-	if(( irqflags & 0x8 ) == 0x8)
-	{
-    /// Debug, remove in final version
-    printf("HAL_packagesend : TxDone flag is set, reset flag\n");
-    // clear TxDone IRQ
-    HAL_writeRegister(REG_IRQ_FLAGS, 0x8);
-
-    // Change mode to standby, probably not required by going in listening mode
-    HAL_writeRegister(REG_OPMODE, SX72_MODE_STANDBY);
-    // Go back to listening
-    HAL_writeRegister(REG_OPMODE, SX72_MODE_RX_CONTINUOS);
-	}
 }
 
 /**
