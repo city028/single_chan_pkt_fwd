@@ -7,7 +7,7 @@
   "deleteLocal": false,
   "hostname": "192.168.1.111",
   "port": "22",
-  "target": "/home/pi/gateway/my-gateway",
+  "target": "/home/pi/single_chan_pkt_fwd",
   "ignore": [
     ".remote-sync.json",
     ".git/**"

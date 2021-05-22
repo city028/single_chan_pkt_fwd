@@ -44,7 +44,6 @@ void HAL_writeRegister(byte addr, byte value);
 void HAL_selectreceiver(void);
 void HAL_unselectreceiver(void);
 void HAL_packagesend(void);
-bool HAL_ReceivePkt(char *payload);
 void HAL_ReceivePacket(void);
 void HAL_TX_FIFO_Update( void );
 void HAL_RX_FIFO_Update( void );
@@ -96,11 +95,6 @@ void HAL_RX_FIFO_Update( void );
 #define LNA_OFF_GAIN                0x00
 #define LNA_LOW_GAIN		    	      0x20
 
-
-
-
-
-
 /**
 * Channel number constant
 */
@@ -112,11 +106,11 @@ static const int CHANNEL = 0;
 enum sf_t { SF7=7, SF8, SF9, SF10, SF11, SF12 };
 
 
-#define LORA_TX_MX_FRAME_SIZE    1024   // Maximum TX frame length = 1024 --> Double check this!!!!
-#define LORA_TX_FIFO_DEPTH         10   // Max 10 frames in UDP TX buffer
+#define LORA_TX_MX_FRAME_SIZE      256   // Maximum TX frame length = 256 bytes in the chip FIFO buffer
+#define LORA_TX_FIFO_DEPTH         10   // Max 10 frames in lora TX buffer
 
-#define LORA_RX_MX_FRAME_SIZE    1024   // Maximum TX frame length = 1024 --> Double check this!!!!
-#define LORA_RX_FIFO_DEPTH         10   // Max 10 frames in UDP TX buffer
+#define LORA_RX_MX_FRAME_SIZE      256   // Maximum TX frame length = 256 bytes in the chip FIFO buffer
+#define LORA_RX_FIFO_DEPTH         10   // Max 10 frames in lora  TX buffer
 
 
 #endif // _hal_hpp_

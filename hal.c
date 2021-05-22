@@ -40,26 +40,22 @@ sf_t sf = SF7;
 
 
 // HAL Variables
-int RST   = 0;
+
 bool sx1272 = true;
 
 // SX1272 - Raspberry connections
-//int ssPin = 6;
-int ssPin = 24;
-int dio0  = 7;
+int ssPin = 24;           // Chip Select pin
+int dio0  = 7;            // DIO0 Interrupt pin
+int RST   = 15;            // Reset pin
 
-// Message buffer
+// B64 Message buffer
+char b64[LORA_RX_MX_FRAME_SIZE];
 
-char b64[256];
-
-// Received number of bytes by RF
-byte receivedbytes;
-
-uint32_t cp_nb_rx_rcv = 0;
-uint32_t cp_nb_rx_ok;
-uint32_t cp_nb_rx_bad;
-uint32_t cp_nb_rx_nocrc;
-uint32_t cp_up_pkt_fwd;
+uint32_t cp_nb_rx_rcv = 0;        // Received Packages
+uint32_t cp_nb_rx_ok = 0;
+uint32_t cp_nb_rx_bad = 0;
+uint32_t cp_nb_rx_nocrc = 0;      // Number of CRC errors
+uint32_t cp_up_pkt_fwd = 0;
 
 /**
 * Lora TX_Buffer structure
@@ -338,8 +334,10 @@ int HAL_SetupLoRa( void )
     HAL_writeRegister(REG_HOP_PERIOD,0xFF);
     HAL_writeRegister(REG_FIFO_ADDR_PTR, HAL_readRegister(REG_FIFO_RX_BASE_AD));
 
-    // Set Continous Receive Mode
+
     HAL_writeRegister(REG_LNA, LNA_MAX_GAIN);  // max lna gain
+
+    // Set Continous Receive Mode
     HAL_writeRegister(REG_OPMODE, SX72_MODE_RX_CONTINUOS);
 
     // No errors
@@ -447,7 +445,7 @@ int HAL_Process_TX()
 *
 * __Input__: void
 *
-* __Output__: void
+* __Output__: Error code:
 *
 * __Status__: Work in Progress
 *
@@ -455,102 +453,93 @@ int HAL_Process_TX()
 */
 int HAL_Process_RX()
 {
-    char Lora_RX_Message[LORA_RX_MX_FRAME_SIZE];
+    byte Lora_RX_Message[LORA_RX_MX_FRAME_SIZE];
 
     // Check DIO0 if there is a package received, if so process if not move on
     if(digitalRead(dio0) == 1)
     {
-        // Message received, process
-        if(HAL_ReceivePkt(Lora_RX_Message))
-        {
-            byte value = HAL_readRegister(REG_PKT_SNR_VALUE);     /// Check on what the SNR value is
-            if( value & 0x80 ) // The SNR sign bit is 1
-            {
-                // Invert and divide by 4
-                value = ( ( ~value + 1 ) & 0xFF ) >> 2;
-                SNR = -value;
-            }
-            else
-            {
-                // Divide by 4
-                SNR = ( value & 0xFF ) >> 2;
-            }
+      // Received something so increase counter
+      cp_nb_rx_rcv++;
+      // Check on CRC errors, read IRG flags
+      int irqflags = HAL_readRegister(REG_IRQ_FLAGS);
 
-            if (sx1272) {
-                rssicorr = 139;
-            } else {
-                rssicorr = 157;
-            }
-
-            ///Debug, remove when done
-            printf("HAL_Process_RX: Packet RSSI: %d, \n",HAL_readRegister(0x1A)-rssicorr);
-            printf("HAL_Process_RX: RSSI: %d, \n",HAL_readRegister(0x1B)-rssicorr);
-            printf("HAL_Process_RX: SNR: %li, \n",SNR);
-            printf("HAL_Process_RX: Length: %i \n",(int)receivedbytes);
-
-            // message contains package, length in receivedbytes
-            // Add to LORA FIFO buffer
-            memcpy(LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_FRAME, Lora_RX_Message, receivedbytes);
-            // set send flag
-            LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_FLAG = 1;                                       // Set flag to one to indicate there is a frame to be send
-            LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_FRAME_SIZE = receivedbytes;                     // Add frame size
-            LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_PACKET_RSSI = HAL_readRegister(0x1A)-rssicorr;  // Store Packet RSSI
-            LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_RSSI = HAL_readRegister(0x1B)-rssicorr;         // Store RSSI
-            LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_SNR = SNR;
-            printf("HAL_Process_RX: Lora Frame received and added to buffer at position: %d\n", LORA_RX_FIFO_Idx );
-            //Increase the fifo index
-            LORA_RX_FIFO_Idx++;
-        }
-    } // dio0=1
-    return 0;
-}
-
-
-/**
-* __Function__: HAL_ReceivePkt
-*
-* __Description__: Package has been received, copy to payload buffer
-*
-* __Input__: Pointer to payload buffer
-*
-* __Output__: bool, False = error, True = no error (change this to int)
-*
-* __Status__: Work in Progress
-*
-* __Remarks__:
-*/
-bool HAL_ReceivePkt(char *payload)
-{
-
-    // clear rxDone
-    HAL_writeRegister(REG_IRQ_FLAGS, 0x40);
-
-    int irqflags = HAL_readRegister(REG_IRQ_FLAGS);
-
-    cp_nb_rx_rcv++;
-
-    //  payload crc: 0x20
-    if((irqflags & 0x20) == 0x20)
-    {
-        printf("CRC error\n");
+      //  payload crc: 0x20
+      if((irqflags & 0x20) == 0x20)
+      {
+        printf("HAL_Process_RX: CRC error\n");
+        cp_nb_rx_nocrc++;
+        // Reset CRC Flag ??
         HAL_writeRegister(REG_IRQ_FLAGS, 0x20);
-        return false;
-    } else {
-
+        // Reset Receive Flag ??, does this reset DIO0 ???
+        HAL_writeRegister(REG_IRQ_FLAGS, 0x40);
+        //return 0;
+      }
+      else
+      {
+        // No CRC, read data
+        // Increase number of non CRC error packages
         cp_nb_rx_ok++;
 
         byte currentAddr = HAL_readRegister(REG_FIFO_RX_CURRENT_ADDR);
         byte receivedCount = HAL_readRegister(REG_RX_NB_BYTES);
-        receivedbytes = receivedCount;
+
+        printf("HAL_Process_RX: Bytes Received %d\n", receivedCount);
+        printf("HAL_Process_RX: Current Address %d\n", currentAddr);
 
         HAL_writeRegister(REG_FIFO_ADDR_PTR, currentAddr);
 
+        // Read data from Chip and store in Buffer
         for(int i = 0; i < receivedCount; i++)
         {
-            payload[i] = (char)HAL_readRegister(REG_FIFO);
+            Lora_RX_Message[i] = HAL_readRegister(REG_FIFO);
+            printf("HAL_Process_RX: Payload: %d = %d\n", i, Lora_RX_Message[i]);
         }
-    }
-    return true;
+
+        /// Now do other stuff, like getting the SNR and RSSI values, not really requred but is stored along with the package
+        byte value = HAL_readRegister(REG_PKT_SNR_VALUE);     /// Check on what the SNR value is = Signal to Noice Ratio
+        if( value & 0x80 ) // The SNR sign bit is 1
+        {
+            // Invert and divide by 4
+            value = ( ( ~value + 1 ) & 0xFF ) >> 2;
+            SNR = -value;
+        }
+        else
+        {
+            // Divide by 4
+            SNR = ( value & 0xFF ) >> 2;
+        }
+
+        if (sx1272) {
+            rssicorr = 139;
+        } else {
+            rssicorr = 157;
+        }
+
+        ///Debug, remove when done
+        printf("HAL_Process_RX: Packet RSSI: %d, \n",HAL_readRegister(0x1A)-rssicorr);
+        printf("HAL_Process_RX: RSSI: %d, \n",HAL_readRegister(0x1B)-rssicorr);
+        printf("HAL_Process_RX: SNR: %li, \n",SNR);
+        printf("HAL_Process_RX: Length: %d \n", receivedCount );
+
+        // message contains package, length in receivedCount
+        // Add to LORA FIFO buffer
+        memcpy(LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_FRAME, Lora_RX_Message, receivedCount);
+        // set send flag
+        LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_FLAG = 1;                                       // Set flag to one to indicate there is a frame to be send
+        LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_FRAME_SIZE = receivedCount;                     // Add frame size
+        LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_PACKET_RSSI = HAL_readRegister(0x1A)-rssicorr;  // Store Packet RSSI
+        LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_RSSI = HAL_readRegister(0x1B)-rssicorr;         // Store RSSI
+        LORA_RX_FIFO_Buffer[LORA_RX_FIFO_Idx].LORA_RX_SNR = SNR;                                      // Store Singal to Noise Ratio
+        printf("HAL_Process_RX: Lora Frame added to buffer at position: %d in FIFO\n", LORA_RX_FIFO_Idx );
+        //Increase the fifo index
+        LORA_RX_FIFO_Idx++;
+
+      } // CRC error
+
+      /// Debug, not sure why but chip seems to freeze up so reset after every received package
+      HAL_SetupLoRa();
+    } // dio0=1
+    return 0;
 }
 
 
